@@ -4,39 +4,20 @@ import { addSriToHtml } from "./internal.js";
 // ESM-only, requires Node 18+ (uses global fetch)
 export default function sri(options = {}) {
 	let algorithm = options.algorithm ?? "sha384";
-	const dev = !!options.dev;
 	const crossorigin = options.crossorigin;
 	const enableCache = options.fetchCache !== false; // default true
 	const fetchTimeoutMs = options.fetchTimeoutMs ?? 5000; // 0 = disabled
 	const remoteCache = enableCache ? new Map() : undefined;
 	const pending = enableCache ? new Map() : undefined;
-	let isDevBuild = false;
-	let devTransformEnabled = !!dev;
 	let isSSR = false;
 	return {
 		name: "vite-plugin-sri-gen",
 		enforce: "post",
-		apply(config, env) {
-			const { command, mode, ssrBuild } = env;
-			// Track SSR early so generateBundle warnings are correct
-			isSSR = !!ssrBuild;
-
-			// Enable during dev server only if explicitly opted-in
-			if (command === "serve" && mode === "development" && dev) {
-				return true;
-			}
-
-			// Enable during build (client or SSR). We'll selectively act in hooks.
-			if (command === "build") {
-				return true;
-			}
-
-			return false;
-		},
+		// Only run during `vite build`
+		apply: "build",
 		configResolved(config) {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
 			isSSR = isSSR || !!config.build?.ssr;
-			isDevBuild = config.command === "serve" && config.mode === "development";
 
 			// Validate algorithm at runtime and fallback safely
 			if (algorithm !== "sha256" && algorithm !== "sha384" && algorithm !== "sha512") {
@@ -50,9 +31,6 @@ export default function sri(options = {}) {
 		},
 
 		async transformIndexHtml(html, context) {
-			if (isDevBuild && !devTransformEnabled) {
-				return html; // Skip SRI in dev mode unless explicitly enabled
-			}
 			return addSriToHtml(html, context?.bundle, {
 				algorithm,
 				crossorigin,

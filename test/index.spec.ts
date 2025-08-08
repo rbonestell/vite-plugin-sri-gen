@@ -68,67 +68,13 @@ describe('vite-plugin-sri-gen', () => {
   })
 
   describe('apply (dev & build modes)', () => {
-    it('enables during dev server only when options.dev is true', () => {
-      const pluginWithDev = sri({ dev: true }) as any
-      const pluginNoDev = sri() as any
-
-      // Dev server + development mode
-      expect(
-        pluginWithDev.apply({}, { command: 'serve', mode: 'development', ssrBuild: false } as any)
-      ).toBe(true)
-
-      // Same env, but dev option not enabled
-      expect(
-        pluginNoDev.apply({}, { command: 'serve', mode: 'development', ssrBuild: false } as any)
-      ).toBe(false)
-
-      // Dev server but not development mode should be disabled
-      expect(
-        pluginWithDev.apply({}, { command: 'serve', mode: 'production', ssrBuild: false } as any)
-      ).toBe(false)
-    })
-
-    it('enables during build for client and SSR (SSR used for prerendered HTML)', () => {
+    it('is build-only (apply = "build")', () => {
       const plugin = sri() as any
-
-      // Client build
-      expect(
-        plugin.apply({}, { command: 'build', mode: 'production', ssrBuild: false } as any)
-      ).toBe(true)
-
-      // SSR build also enabled (transformIndexHtml won't run, but generateBundle can process prerendered HTML)
-      expect(
-        plugin.apply({}, { command: 'build', mode: 'production', ssrBuild: true } as any)
-      ).toBe(true)
+      expect(plugin.apply).toBe('build')
     })
   })
 
-  describe('transformIndexHtml dev gating', () => {
-    it('skips transform in dev when dev option is false', async () => {
-      const plugin = sri({ algorithm: 'sha256' }) as any
-      // Simulate dev server
-      plugin.configResolved?.({ command: 'serve', mode: 'development', appType: 'spa', build: {} } as any)
-
-      const html = `<!doctype html><html><head>
-        <script src="/a.js"></script>
-      </head></html>`
-      const out = await plugin.transformIndexHtml(html, { bundle: mockBundle({ 'a.js': 'console.log(1)' }) } as any)
-      expect(out).toContain('<script src="/a.js"></script>') // unchanged
-      expect(out).not.toContain('integrity=')
-    })
-
-    it('applies transform in dev when dev option is true', async () => {
-      const plugin = sri({ algorithm: 'sha256', dev: true }) as any
-      // Simulate dev server
-      plugin.configResolved?.({ command: 'serve', mode: 'development', appType: 'spa', build: {} } as any)
-
-      const html = `<!doctype html><html><head>
-        <script src="/a.js"></script>
-      </head></html>`
-      const out = await plugin.transformIndexHtml(html, { bundle: mockBundle({ 'a.js': 'console.log(1)' }) } as any)
-      expect(out).toContain('integrity="sha256-')
-    })
-  })
+  // Dev gating removed: plugin is build-only
 
   describe('generateBundle (MPA/SSR prerender)', () => {
     it('adds integrity to emitted HTML assets', async () => {
@@ -213,8 +159,8 @@ describe('vite-plugin-sri-gen', () => {
     it('uses plugin context warn when available', async () => {
       const plugin = sri() as any
       const warnSpy = vi.fn()
-      // Simulate SSR build with no HTML to trigger the warn path
-      plugin.apply({}, { command: 'build', mode: 'production', ssrBuild: true } as any)
+  // Simulate SSR build with no HTML to trigger the warn path
+  plugin.configResolved?.({ command: 'build', mode: 'production', appType: 'ssr', build: { ssr: true } } as any)
       // Call with plugin context containing warn()
       await plugin.generateBundle.call({ warn: warnSpy }, {}, {} as any)
       expect(warnSpy).toHaveBeenCalled()

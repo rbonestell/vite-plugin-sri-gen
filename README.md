@@ -9,7 +9,7 @@ Add Subresource Integrity (SRI) to your Vite HTML output automatically.
 
 - Adds integrity to script tags, stylesheet links, and modulepreload links in index.html
 - Works out of the box in production builds
-- Optional dev mode support to preview SRI while running the Vite dev server
+- Build-only by design (no dev server SRI)
 - Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
 - Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
 - ESM-only, Node 18+ (uses global fetch)
@@ -33,7 +33,6 @@ export default {
       // optional
       algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
       crossorigin: undefined,    // 'anonymous' | 'use-credentials' | undefined
-      // dev: false,             // set to true to enable during the Vite dev server
   // fetchCache: true,       // cache remote fetches in-memory and dedupe concurrent requests (default: true)
   // fetchTimeoutMs: 0,      // abort remote fetches after N ms; 0 disables timeout (default: 0)
     })
@@ -43,25 +42,18 @@ export default {
 
 During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
 
-## Dev mode (optional)
+## Dev mode
 
-By default, SRI is not applied while running the Vite dev server. You can opt in with the dev option:
+SRI is intentionally disabled during the Vite dev server. Use this plugin for build output only.
 
-```ts
-import sri from 'vite-plugin-sri-gen'
+Why dev SRI doesn’t help:
 
-export default {
-  plugins: [
-    sri({ dev: true })
-  ]
-}
-```
+- HMR bypasses SRI entirely: code updates are delivered over WebSocket and inlined into the page, not via normal `script`/`link` fetches that support integrity checks.
+- Non-stable module URLs: the dev server rewrites ESM imports and appends timestamps/query params. Content changes frequently during edits, so any integrity value would break on each save.
+- No transitive guarantees: browsers don’t enforce SRI for modules imported by a script with integrity. Each module request would need its own integrity, which the browser won’t verify in dev.
+- Partial coverage is misleading: hashing only top-level tags (or some assets) provides a false sense of security while leaving the rest of the module graph and HMR updates unverified.
 
-Behavior summary:
-
-- Dev server: enabled only when dev: true and mode is development
-- Build: enabled for client builds (ssrBuild: false)
-- SSR builds: disabled (transformIndexHtml does not run for SSR server output)
+Conclusion: SRI is enforced only for build outputs, where assets are content-addressed and stable. That’s when browsers can reliably validate integrity and you get real protection.
 
 ## Configuration
 
@@ -69,7 +61,6 @@ Behavior summary:
 type SriPluginOptions = {
   algorithm?: 'sha256' | 'sha384' | 'sha512' // default: 'sha384'
   crossorigin?: 'anonymous' | 'use-credentials' // default: undefined
-  dev?: boolean // default: false
   fetchCache?: boolean // default: true (in-memory cache + in-flight dedupe for remote assets)
   fetchTimeoutMs?: number // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
 }
@@ -144,21 +135,6 @@ Notes:
 
 - If no HTML is emitted (pure SSR server output), you’ll see a warning and nothing is changed.
 - You don’t need extra configuration for SRI; inclusion of the plugin is enough when HTML files are produced.
-
-
-### Dev server preview (optional)
-
-You can preview SRI in dev by opting in:
-
-```ts
-import sri from 'vite-plugin-sri-gen'
-
-export default {
-  plugins: [
-    sri({ dev: true })
-  ]
-}
-```
 
 ### Advanced: networking controls
 
