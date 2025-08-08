@@ -1,0 +1,16 @@
+{
+	"editor.insertSpaces": false,
+	"editor.tabSize": 2,
+	"editor.detectIndentation": false,
+	"editor.formatOnPaste": true,
+	"editor.renderWhitespace": "all",
+	"editor.codeActionsOnSave": {
+		"source.organizeImports": "explicit",
+		"source.fixAll.eslint": "explicit",
+	},
+	"typescript.preferences.importModuleSpecifier": "shortest",
+	"eslint.validate": [
+		"javascript",
+		"typescript"
+	],
+}

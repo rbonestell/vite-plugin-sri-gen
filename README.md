@@ -1,0 +1,187 @@
+# vite-plugin-sri-gen
+
+Add Subresource Integrity (SRI) to your Vite HTML output automatically.
+
+[![npm version](https://img.shields.io/npm/v/vite-plugin-sri-gen.svg)](https://www.npmjs.com/package/vite-plugin-sri-gen)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+## Features
+
+- Adds integrity to script tags, stylesheet links, and modulepreload links in index.html
+- Works out of the box in production builds
+- Optional dev mode support to preview SRI while running the Vite dev server
+- Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
+- Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
+- ESM-only, Node 18+ (uses global fetch)
+
+## Install
+
+```sh
+npm i -D vite-plugin-sri-gen
+```
+
+## Quick start
+
+vite.config.ts / vite.config.js:
+
+```ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  plugins: [
+    sri({
+      // optional
+      algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
+      crossorigin: undefined,    // 'anonymous' | 'use-credentials' | undefined
+      // dev: false,             // set to true to enable during the Vite dev server
+  // fetchCache: true,       // cache remote fetches in-memory and dedupe concurrent requests (default: true)
+  // fetchTimeoutMs: 0,      // abort remote fetches after N ms; 0 disables timeout (default: 0)
+    })
+  ]
+}
+```
+
+During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
+
+## Dev mode (optional)
+
+By default, SRI is not applied while running the Vite dev server. You can opt in with the dev option:
+
+```ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  plugins: [
+    sri({ dev: true })
+  ]
+}
+```
+
+Behavior summary:
+
+- Dev server: enabled only when dev: true and mode is development
+- Build: enabled for client builds (ssrBuild: false)
+- SSR builds: disabled (transformIndexHtml does not run for SSR server output)
+
+## Configuration
+
+```ts
+type SriPluginOptions = {
+  algorithm?: 'sha256' | 'sha384' | 'sha512' // default: 'sha384'
+  crossorigin?: 'anonymous' | 'use-credentials' // default: undefined
+  dev?: boolean // default: false
+  fetchCache?: boolean // default: true (in-memory cache + in-flight dedupe for remote assets)
+  fetchTimeoutMs?: number // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
+}
+```
+
+Notes:
+
+- Remote assets (http/https) are fetched at build to compute hashes. Protocol-relative URLs (//cdn.example.com/foo.js) are supported and treated as https.
+- Local assets are read from the build bundle output.
+- Existing integrity attributes are preserved and not overwritten.
+- If an asset cannot be found in the bundle, it is skipped.
+- Invalid or unsupported algorithms are automatically replaced with 'sha384' and a warning is logged.
+- Caching: when enabled, remote fetches are cached in-memory per build and concurrent requests are deduplicated.
+- Timeout: when a non-zero fetchTimeoutMs is set, slow remote fetches are aborted and the affected elements are left unchanged (a warning is logged).
+
+## Compatibility
+
+- SPA (appType: 'spa'): supported. transformIndexHtml runs at build to add SRI to index.html.
+- MPA: supported. generateBundle scans emitted .html files and injects SRI.
+- SSR/SSG: prerendered/static HTML is supported via generateBundle. For pure SSR server output (no .html emitted), there's nothing to modify at build time.
+- Node 18+ only (uses global fetch). ESM-only package.
+
+When building for SSR, if no HTML files are emitted, the plugin logs a warning to help diagnose why SRI wasn't applied:
+
+> [vite-plugin-sri-gen] No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
+
+## Examples
+
+### MPA (multiple HTML entry points)
+
+Configure multiple HTML inputs so Vite emits several .html files. The plugin will inject SRI into all of them:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import sri from 'vite-plugin-sri-gen'
+
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        about: 'about/index.html',
+        admin: 'admin/index.html',
+      },
+    },
+  },
+  plugins: [
+    sri({ crossorigin: 'anonymous' }),
+  ],
+})
+```
+
+### SSR/SSG with prerendered HTML
+
+If your SSR/SSG setup emits static HTML during build (for example via a prerender step), the plugin will add SRI to those files automatically via generateBundle:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import sri from 'vite-plugin-sri-gen'
+
+export default defineConfig({
+  // Your SSR/SSG tooling may set build.ssr, use a prerender plugin/step, etc.
+  plugins: [
+    sri(),
+  ],
+})
+```
+
+Notes:
+
+- If no HTML is emitted (pure SSR server output), you’ll see a warning and nothing is changed.
+- You don’t need extra configuration for SRI; inclusion of the plugin is enough when HTML files are produced.
+
+
+### Dev server preview (optional)
+
+You can preview SRI in dev by opting in:
+
+```ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  plugins: [
+    sri({ dev: true })
+  ]
+}
+```
+
+### Advanced: networking controls
+
+Tune caching and timeouts for remote assets:
+
+```ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  plugins: [
+    sri({
+      crossorigin: 'anonymous',
+      fetchCache: true,      // keep enabled for best performance
+      fetchTimeoutMs: 5000,  // fail fast if a CDN becomes slow or unresponsive
+    })
+  ]
+}
+```
+
+## Why ESM-only?
+
+Vite and modern Node tooling are native ESM-first. Dropping CommonJS simplifies the package and aligns with Vite expectations.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
