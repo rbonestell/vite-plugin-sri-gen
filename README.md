@@ -42,6 +42,12 @@ export default {
 
 During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
 
+TypeScript/ESM notes:
+
+- The package ships ESM only with types. Import as `import sri from 'vite-plugin-sri-gen'`.
+- Built files live in `dist/` and type definitions at `dist/index.d.ts`.
+
+
 ## Dev mode
 
 SRI is intentionally disabled during the Vite dev server. Use this plugin for build output only.

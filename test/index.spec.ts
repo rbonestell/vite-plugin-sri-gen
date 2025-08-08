@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import sri from '../src/index.js';
+import sri from '../src/index';
 
 type BundleEntry = { code?: any; source?: any }
 type Bundle = Record<string, BundleEntry>
@@ -33,16 +33,12 @@ describe('vite-plugin-sri-gen', () => {
       error: (e: any) => { throw (e instanceof Error ? e : new Error(String(e))) },
     } as any
 
-    const out = await plugin.transformIndexHtml!.call(
-      fakeCtx,
-      html,
-      {
-        bundle: mockBundle({
-          'style.css': 'body{color:red}',
-          'entry.js': 'console.log("hi")',
-        })
-      }
-    )
+    const out = await plugin.transformIndexHtml!.call(fakeCtx, html, {
+			bundle: mockBundle({
+				"style.css": "body{color:red}",
+				"entry.js": 'console.log("hi")',
+			}),
+		} as any);
 
     expect(out).toContain('integrity="sha256-')
   })
@@ -53,7 +49,7 @@ describe('vite-plugin-sri-gen', () => {
       <script src="/a.js" integrity="sha256-abc"></script>
     </head></html>`
     const fakeCtx = { meta: { watchMode: false }, debug(){}, info(){}, warn(){}, error(e:any){ throw e } } as any
-    const out = await plugin.transformIndexHtml!.call(fakeCtx, html, { bundle: mockBundle({ 'a.js': 'console.log(1)' }) })
+    const out = await plugin.transformIndexHtml!.call(fakeCtx, html, { bundle: mockBundle({ 'a.js': 'console.log(1)' }) } as any)
     expect(out).toContain('integrity="sha256-abc"')
   })
 
@@ -63,7 +59,9 @@ describe('vite-plugin-sri-gen', () => {
       <link rel="stylesheet" href="/a.css" />
     </head></html>`
     const fakeCtx = { meta: { watchMode: false }, debug(){}, info(){}, warn(){}, error(e:any){ throw e } } as any
-    const out = await plugin.transformIndexHtml!.call(fakeCtx, html, { bundle: mockBundle({ 'a.css': 'body{ }' }) })
+    const out = await plugin.transformIndexHtml!.call(fakeCtx, html, {
+			bundle: mockBundle({ "a.css": "body{ }" }),
+		} as any);
     expect(out).toContain('crossorigin="anonymous"')
   })
 

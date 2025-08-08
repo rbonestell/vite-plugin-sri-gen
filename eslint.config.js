@@ -1,5 +1,7 @@
-// ESLint flat config enforcing tabs for indentation and semicolons at end of statements
-// Applies to JS files in this repo. Adjust or extend for TS if needed later.
+// ESLint flat config enforcing style and quality for JS and TS
+import tsPlugin from "@typescript-eslint/eslint-plugin";
+import tsParser from "@typescript-eslint/parser";
+
 export default [
 	{
 		files: ["**/*.{js,cjs,mjs}"],
@@ -14,6 +16,58 @@ export default [
 			"no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
 			// Require semicolons
 			semi: ["error", "always"],
+		},
+	},
+	// TypeScript (source)
+	{
+		files: ["src/**/*.{ts,tsx}"],
+		languageOptions: {
+			parser: tsParser,
+			parserOptions: {
+				ecmaVersion: "latest",
+				sourceType: "module",
+				project: false,
+			},
+		},
+		plugins: {
+			"@typescript-eslint": tsPlugin,
+		},
+		rules: {
+			// Base style
+			"no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
+			semi: ["error", "always"],
+			// TS best practices
+			"@typescript-eslint/consistent-type-imports": [
+				"error",
+				{ fixStyle: "separate-type-imports", disallowTypeAnnotations: false }
+			],
+			"@typescript-eslint/no-unused-vars": [
+				"error",
+				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+			],
+		},
+	},
+
+	// TypeScript (tests) — relax formatting rules
+	{
+		files: ["test/**/*.{ts,tsx}"],
+		languageOptions: {
+			parser: tsParser,
+			parserOptions: {
+				ecmaVersion: "latest",
+				sourceType: "module",
+			},
+		},
+		plugins: {
+			"@typescript-eslint": tsPlugin,
+		},
+		rules: {
+			semi: "off",
+			"@typescript-eslint/consistent-type-imports": "off",
+			"@typescript-eslint/no-unused-vars": [
+				"warn",
+				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+			],
 		},
 	},
 	{

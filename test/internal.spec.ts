@@ -1,14 +1,17 @@
 import { load as cheerioLoad } from 'cheerio';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	addSriToHtml,
-	computeIntegrity,
-	getUrlAttrName,
-	isHttpUrl,
-	loadResource,
-	normalizeBundlePath,
-	processElement,
-} from '../src/internal.js';
+    addSriToHtml,
+    computeIntegrity,
+    getUrlAttrName,
+    isHttpUrl,
+    loadResource,
+    normalizeBundlePath,
+    processElement,
+} from '../src/internal';
+// Use TS source import path (extensionless)
+// @ts-ignore - resolved by TS during tests
+export { };
 
 type BundleEntry = { code?: any; source?: any }
 type Bundle = Record<string, BundleEntry>
@@ -121,9 +124,9 @@ describe('helpers', () => {
 
 		it('applies fetch timeout when configured', async () => {
 			// Simulate a hanging fetch that never resolves; AbortController will abort
-			let abortHandler: () => void
+			let _abortHandler: () => void
 			const controller = new AbortController()
-			const signal = controller.signal
+			const _signal = controller.signal
 			const fetchSpy = vi.fn().mockImplementation((_url, init: any) => {
 				// When our internal AbortController aborts, fetch should reject
 				const p = new Promise((_resolve, reject) => {
@@ -156,7 +159,7 @@ describe('helpers', () => {
 	})
 
 	describe('processElement', () => {
-		let $
+		let $: ReturnType<typeof cheerioLoad>
 		beforeEach(() => {
 			$ = cheerioLoad('<html><head><script src="/a.js"></script><link rel="stylesheet" href="/a.css"></head></html>')
 		})

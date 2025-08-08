@@ -1,0 +1,17 @@
+{
+  "include": ["src", "test"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "dist",
+    "declaration": true,
+    "declarationDir": "dist",
+    "noEmit": true,
+    "types": ["node", "vitest"]
+  }
+}
