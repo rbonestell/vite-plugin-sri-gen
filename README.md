@@ -88,7 +88,7 @@ Notes:
 
 When building for SSR, if no HTML files are emitted, the plugin logs a warning to help diagnose why SRI wasn't applied:
 
-> [vite-plugin-sri-gen] No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
+> No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
 
 ## Examples
 
