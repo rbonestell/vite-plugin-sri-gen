@@ -53,6 +53,14 @@
     "web-security",
     "content-security-policy"
   ],
+  "homepage": "https://github.com/rbonestell/vite-plugin-sri-gen",
+  "bugs": {
+    "url": "https://github.com/rbonestell/vite-plugin-sri-gen/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rbonestell/vite-plugin-sri-gen.git"
+  },
   "author": {
     "name": "Bobby Bonestell",
     "url": "https://rbonestell.com"
