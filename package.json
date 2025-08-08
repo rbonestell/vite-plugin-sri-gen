@@ -15,10 +15,8 @@
     "clean": "rimraf dist",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
-    "release": "npm run clean && npm run build && npm publish --access public",
-    "release:dry": "npm run clean && npm run build && npm pack",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=lcov",
+    "test:cov": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=lcov",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
