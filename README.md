@@ -161,6 +161,14 @@ export default {
 
 Vite and modern Node tooling are native ESM-first. Dropping CommonJS simplifies the package and aligns with Vite expectations.
 
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for the fork/branch/PR workflow (git-flow style with prefixes like `feat/`, `fix/`, `bug/`) and the testing/linting expectations.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for supported versions and how to report vulnerabilities via the repository’s Security section.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
