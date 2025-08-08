@@ -1,11 +1,11 @@
 # vite-plugin-sri-gen
 [![NPM Version](https://img.shields.io/npm/v/vite-plugin-sri-gen.svg)](https://www.npmjs.com/package/vite-plugin-sri-gen) [![Build Status](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/build.yml?logo=typescript&logoColor=white)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/build.yml?query=branch%3Amain) [![Test Results](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain) [![Code Coverage](https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white)](https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/) [![Known Vulnerabilities](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen/badge.svg)](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Add [Subresource Integrity (SRI)](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) to your Vite HTML output automatically.
+Add [Subresource Integrity (SRI)](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hashes to your Vite build HTML output automatically.
 
 ## Features
 
-- Adds integrity to script tags, stylesheet links, and modulepreload links in index.html
+- Adds integrity attribute to script tags, stylesheet links, and modulepreload links in index.html
 - Works out of the box in production builds
 - Build-only by design (no dev server SRI)
 - Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
@@ -28,11 +28,10 @@ import sri from 'vite-plugin-sri-gen'
 export default {
   plugins: [
     sri({
-      // optional
       algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
-      crossorigin: undefined,    // 'anonymous' | 'use-credentials' | undefined
-  // fetchCache: true,       // cache remote fetches in-memory and dedupe concurrent requests (default: true)
-  // fetchTimeoutMs: 0,      // abort remote fetches after N ms; 0 disables timeout (default: 0)
+      crossorigin: 'anonymous',  // 'anonymous' | 'use-credentials' | undefined
+      fetchCache: true,          // cache remote fetches in-memory and dedupe concurrent requests (default: true)
+      fetchTimeoutMs: 10000,     // abort remote fetches after N ms; 0 disables timeout (default: 5000)
     })
   ]
 }
