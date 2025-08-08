@@ -1,9 +1,7 @@
 # vite-plugin-sri-gen
+[![NPM Version](https://img.shields.io/npm/v/vite-plugin-sri-gen.svg)](https://www.npmjs.com/package/vite-plugin-sri-gen) [![Build Status](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/build.yml?logo=typescript&logoColor=white)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/build.yml?query=branch%3Amain) [![Test Results](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain) [![Code Coverage](https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white)](https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/) [![Known Vulnerabilities](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen/badge.svg)](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Add Subresource Integrity (SRI) to your Vite HTML output automatically.
-
-[![npm version](https://img.shields.io/npm/v/vite-plugin-sri-gen.svg)](https://www.npmjs.com/package/vite-plugin-sri-gen)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Features
 
