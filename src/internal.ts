@@ -86,7 +86,10 @@ export async function loadResource(
 		const doFetch = async (): Promise<Uint8Array> => {
 			let res: Response;
 			try {
-				res = await fetch(url, signal ? { signal } : (undefined as any));
+				res = await fetch(
+					url,
+					signal ? { signal } : (undefined as any)
+				);
 			} finally {
 				if (timeoutId) clearTimeout(timeoutId);
 			}

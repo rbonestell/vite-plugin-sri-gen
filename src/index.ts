@@ -20,7 +20,8 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 		context: IndexHtmlTransformContext
 	): Promise<string>;
 } {
-	let algorithm: "sha256" | "sha384" | "sha512" = options.algorithm ?? "sha384";
+	let algorithm: "sha256" | "sha384" | "sha512" =
+		options.algorithm ?? "sha384";
 	const crossorigin = options.crossorigin;
 	const enableCache = options.fetchCache !== false; // default true
 	const fetchTimeoutMs = options.fetchTimeoutMs ?? 5000; // 0 = disabled
@@ -57,7 +58,10 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 			}
 		},
 
-		async transformIndexHtml(html: string, context: IndexHtmlTransformContext) {
+		async transformIndexHtml(
+			html: string,
+			context: IndexHtmlTransformContext
+		) {
 			const resourceOpts: LoadResourceOptions = {
 				cache: remoteCache,
 				pending,
@@ -82,13 +86,15 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 					: console.warn;
 			// Add SRI to any emitted HTML files (useful for MPA and SSR prerendered outputs)
 			// This runs for both client and SSR builds; we only modify .html assets if present.
-			const htmlFiles = Object.entries(bundle).filter(([fileName, out]) => {
-				return (
-					fileName.toLowerCase().endsWith(".html") &&
-					out &&
-					(out as any).type === "asset"
-				);
-			});
+			const htmlFiles = Object.entries(bundle).filter(
+				([fileName, out]) => {
+					return (
+						fileName.toLowerCase().endsWith(".html") &&
+						out &&
+						(out as any).type === "asset"
+					);
+				}
+			);
 			if (htmlFiles.length === 0) {
 				if (isSSR) {
 					warn(

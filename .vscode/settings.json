@@ -1,16 +1,26 @@
 {
 	"editor.insertSpaces": false,
-	"editor.tabSize": 2,
+	"editor.tabSize": 4,
 	"editor.detectIndentation": false,
 	"editor.formatOnPaste": true,
+	"editor.formatOnSave": true,
 	"editor.renderWhitespace": "all",
 	"editor.codeActionsOnSave": {
 		"source.organizeImports": "explicit",
-		"source.fixAll.eslint": "explicit",
+		"source.fixAll.eslint": "always"
 	},
-	"typescript.preferences.importModuleSpecifier": "shortest",
+	// ESLint as the formatter + fix on save for JS/TS only
 	"eslint.validate": [
 		"javascript",
 		"typescript"
 	],
+	"eslint.format.enable": true,
+	"eslint.codeActionsOnSave.mode": "all",
+	"eslint.useFlatConfig": true,
+	// Keep JSON formatted by the built-in JSON formatter
+	"[json]": {
+		"editor.defaultFormatter": "vscode.json-language-features"
+	},
+	"json.format.enable": true,
+	"typescript.preferences.importModuleSpecifier": "shortest"
 }

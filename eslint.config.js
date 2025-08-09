@@ -3,6 +3,7 @@ import tsPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 
 export default [
+	// JavaScript
 	{
 		files: ["**/*.{js,cjs,mjs}"],
 		languageOptions: {
@@ -18,7 +19,7 @@ export default [
 			semi: ["error", "always"],
 		},
 	},
-	// TypeScript (source)
+	// TypeScript
 	{
 		files: ["src/**/*.{ts,tsx}"],
 		languageOptions: {
@@ -26,47 +27,30 @@ export default [
 			parserOptions: {
 				ecmaVersion: "latest",
 				sourceType: "module",
-				project: false,
 			},
 		},
 		plugins: {
 			"@typescript-eslint": tsPlugin,
 		},
 		rules: {
-			// Base style
+			// Enforce tabs for indentation
+			indent: ["error", "tab", { SwitchCase: 1 }],
+			// Prevent mixing spaces and tabs
 			"no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
+			// Require semicolons
 			semi: ["error", "always"],
 			// TS best practices
 			"@typescript-eslint/consistent-type-imports": [
-				"error",
-				{ fixStyle: "separate-type-imports", disallowTypeAnnotations: false }
+				"warn",
+				{
+					fixStyle: "separate-type-imports",
+					disallowTypeAnnotations: false,
+				},
 			],
-			"@typescript-eslint/no-unused-vars": [
-				"error",
-				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
-			],
-		},
-	},
-
-	// TypeScript (tests) — relax formatting rules
-	{
-		files: ["test/**/*.{ts,tsx}"],
-		languageOptions: {
-			parser: tsParser,
-			parserOptions: {
-				ecmaVersion: "latest",
-				sourceType: "module",
-			},
-		},
-		plugins: {
-			"@typescript-eslint": tsPlugin,
-		},
-		rules: {
-			semi: "off",
 			"@typescript-eslint/consistent-type-imports": "off",
 			"@typescript-eslint/no-unused-vars": [
 				"warn",
-				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
 			],
 		},
 	},
