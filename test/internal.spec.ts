@@ -11,7 +11,7 @@ import {
 } from "../src/internal";
 // Use TS source import path (extensionless)
 // @ts-ignore - resolved by TS during tests
-export { };
+export {};
 
 type BundleEntry = { code?: any; source?: any };
 type Bundle = Record<string, BundleEntry>;
@@ -64,7 +64,9 @@ describe("helpers", () => {
 
 	describe("getUrlAttrName", () => {
 		it("returns src for script and href otherwise", () => {
-			const $s = cheerioLoad('<script src="/a.js"></script>')("script").get(0);
+			const $s = cheerioLoad('<script src="/a.js"></script>')(
+				"script"
+			).get(0);
 			const $l = cheerioLoad('<link rel="stylesheet" href="/a.css">')(
 				"link"
 			).get(0);
@@ -95,12 +97,10 @@ describe("helpers", () => {
 
 		it("fetches remote when http and returns bytes", async () => {
 			const bytes = new Uint8Array([1, 2, 3]);
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue({
-					ok: true,
-					arrayBuffer: () => Promise.resolve(bytes.buffer),
-				}) as any;
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				arrayBuffer: () => Promise.resolve(bytes.buffer),
+			}) as any;
 			const res = await loadResource(
 				"https://example.com/x.js",
 				{},
@@ -112,13 +112,11 @@ describe("helpers", () => {
 		});
 
 		it("throws on failed fetch", async () => {
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue({
-					ok: false,
-					status: 404,
-					statusText: "Not Found",
-				}) as any;
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 404,
+				statusText: "Not Found",
+			}) as any;
 			await expect(
 				loadResource("https://example.com/404.js", {})
 			).rejects.toThrow("Failed to fetch");
@@ -126,12 +124,10 @@ describe("helpers", () => {
 
 		it("supports protocol-relative URLs via https", async () => {
 			const bytes = new Uint8Array([9, 8, 7]);
-			const fetchSpy = vi
-				.fn()
-				.mockResolvedValue({
-					ok: true,
-					arrayBuffer: () => Promise.resolve(bytes.buffer),
-				});
+			const fetchSpy = vi.fn().mockResolvedValue({
+				ok: true,
+				arrayBuffer: () => Promise.resolve(bytes.buffer),
+			});
 			globalThis.fetch = fetchSpy as any;
 			const res = await loadResource(
 				"//cdn.example.com/lib.js",
@@ -139,17 +135,17 @@ describe("helpers", () => {
 				{ enableCache: false }
 			);
 			expect(res).toBeInstanceOf(Uint8Array);
-			expect(fetchSpy.mock.calls[0][0]).toBe("https://cdn.example.com/lib.js");
+			expect(fetchSpy.mock.calls[0][0]).toBe(
+				"https://cdn.example.com/lib.js"
+			);
 		});
 
 		it("caches remote fetches when enabled", async () => {
 			const bytes = new Uint8Array([5, 4, 3]);
-			const fetchSpy = vi
-				.fn()
-				.mockResolvedValue({
-					ok: true,
-					arrayBuffer: () => Promise.resolve(bytes.buffer),
-				});
+			const fetchSpy = vi.fn().mockResolvedValue({
+				ok: true,
+				arrayBuffer: () => Promise.resolve(bytes.buffer),
+			});
 			globalThis.fetch = fetchSpy as any;
 			const cache = new Map<string, Uint8Array>();
 			const url = "https://example.com/once.js";
@@ -197,7 +193,9 @@ describe("helpers", () => {
 		});
 
 		it("prefers source over code when code is missing", async () => {
-			const bundle = mockBundle({ "a.js": { source: "console.log(42)" } });
+			const bundle = mockBundle({
+				"a.js": { source: "console.log(42)" },
+			});
 			const res = await loadResource("/a.js", bundle);
 			expect(res).toBe("console.log(42)");
 		});
@@ -226,7 +224,11 @@ describe("helpers", () => {
 		it("skips when already has integrity", async () => {
 			const $script = $("script");
 			$script.attr("integrity", "sha256-abc");
-			await processElement($script, mockBundle({ "a.js": "x" }), "sha256");
+			await processElement(
+				$script,
+				mockBundle({ "a.js": "x" }),
+				"sha256"
+			);
 			expect($script.attr("integrity")).toBe("sha256-abc");
 		});
 
@@ -238,12 +240,22 @@ describe("helpers", () => {
 
 		it("skips when element wrapper is invalid", async () => {
 			const fakeWrapper: any = { get: () => undefined, attr: () => {} };
-			await processElement(fakeWrapper, mockBundle({ "a.js": "x" }), "sha256");
+			await processElement(
+				fakeWrapper,
+				mockBundle({ "a.js": "x" }),
+				"sha256"
+			);
 		});
 
 		it("skips when URL attribute missing", async () => {
-			const $noHref = cheerioLoad('<link rel="stylesheet"></link>')("link");
-			await processElement($noHref, mockBundle({ "a.css": "x" }), "sha256");
+			const $noHref = cheerioLoad('<link rel="stylesheet"></link>')(
+				"link"
+			);
+			await processElement(
+				$noHref,
+				mockBundle({ "a.css": "x" }),
+				"sha256"
+			);
 			expect($noHref.attr("integrity")).toBeUndefined();
 		});
 	});
@@ -290,38 +302,65 @@ describe("helpers", () => {
 			const bundle = mockBundle({
 				"dist/assets/nested/path/app.js": "console.log(1)",
 			});
-			const out = await addSriToHtml(html, bundle, { algorithm: "sha256" });
+			const out = await addSriToHtml(html, bundle, {
+				algorithm: "sha256",
+			});
 			expect(out).toContain('integrity="sha256-');
 		});
 
 		it("resolves bundle items via basename fallback", async () => {
 			const html = `<html><head><script src="/assets/app.js"></script></head></html>`;
 			const bundle = mockBundle({ "dist/app.js": "console.log(2)" });
-			const out = await addSriToHtml(html, bundle, { algorithm: "sha256" });
+			const out = await addSriToHtml(html, bundle, {
+				algorithm: "sha256",
+			});
 			expect(out).toContain('integrity="sha256-');
 		});
 
 		it("warns per element when processing fails", async () => {
 			const realFetch = globalThis.fetch;
-			const warnLocal = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const warnLocal = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
 			try {
-				globalThis.fetch = vi
-					.fn()
-					.mockResolvedValue({
-						ok: false,
-						status: 500,
-						statusText: "ERR",
-					}) as any;
+				globalThis.fetch = vi.fn().mockResolvedValue({
+					ok: false,
+					status: 500,
+					statusText: "ERR",
+				}) as any;
 				const html = `<html><head><script src=\"//cdn.example.com/a.js\"></script></head></html>`;
 				const out = await addSriToHtml(html, mockBundle({}), {
 					algorithm: "sha256",
 				});
-				expect(out).toContain('<script src="//cdn.example.com/a.js"></script>');
+				expect(out).toContain(
+					'<script src="//cdn.example.com/a.js"></script>'
+				);
 				expect(warnLocal).toHaveBeenCalled();
 			} finally {
 				globalThis.fetch = realFetch as any;
 				warnLocal.mockRestore();
 			}
+		});
+
+		it("adds integrity to preload links for scripts and styles", async () => {
+			const html = `<!doctype html><html><head>
+				<link rel="preload" as="script" href="/entry.js">
+				<link rel="preload" as="style" href="/style.css">
+			</head></html>`;
+			const out = await addSriToHtml(
+				html,
+				mockBundle({
+					"entry.js": "console.log(0)",
+					"style.css": "body{}",
+				}),
+				{ algorithm: "sha256" }
+			);
+			expect(out).toContain(
+				'<link rel="preload" as="script" href="/entry.js" integrity="sha256-'
+			);
+			expect(out).toContain(
+				'<link rel="preload" as="style" href="/style.css" integrity="sha256-'
+			);
 		});
 	});
 });
