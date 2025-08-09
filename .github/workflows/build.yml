@@ -10,6 +10,7 @@ on:
       - '.github/workflows/build.yml'
       - 'package.json'
       - 'tsconfig.json'
+      - 'vite.config.ts'
 jobs:
   build:
     runs-on: ubuntu-latest
