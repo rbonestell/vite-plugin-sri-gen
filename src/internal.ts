@@ -177,7 +177,7 @@ export async function addSriToHtml(
 ): Promise<string> {
 	const $ = load(html);
 	const $elements = $(
-		'script[src], link[rel="stylesheet"][href], link[rel="modulepreload"][href]'
+		'script[src], link[rel="stylesheet"][href], link[rel="modulepreload"][href], link[rel="preload"][as="script" i][href], link[rel="preload"][as="style" i][href]'
 	);
 
 	await Promise.all(
