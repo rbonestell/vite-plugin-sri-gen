@@ -1,9 +1,19 @@
+<p align="center">
+ 	<img src="https://repository-images.githubusercontent.com/1034544632/2a282a35-ba36-49c1-ae44-407569c62a4b" width=50% height=50% alt="vite-plugin-sri-gen" />
+</p>
+<p align="center">
+	Add <a href="https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity">Subresource Integrity (SRI)</a> hashes to your Vite build HTML output automatically.
+</p>
+<p align="center">
+	<a href="https://www.npmjs.com/package/vite-plugin-sri-gen"><img src="https://img.shields.io/npm/v/vite-plugin-sri-gen.svg" alt="NPM Version"></a>
+<a href="https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/build.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/build.yml?logo=typescript&logoColor=white" alt="Build Status"></a>
+<a href="https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests" alt="Test Results"></a>
+<a href="https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/"><img src="https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white" alt="Code Coverage"></a>
+<a href="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen"><img src="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen/badge.svg" alt="Known Vulnerabilities"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+</p>
+
 # vite-plugin-sri-gen
-[![NPM Version](https://img.shields.io/npm/v/vite-plugin-sri-gen.svg)](https://www.npmjs.com/package/vite-plugin-sri-gen) [![Build Status](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/build.yml?logo=typescript&logoColor=white)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/build.yml?query=branch%3Amain) [![Test Results](https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests)](https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain) [![Code Coverage](https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white)](https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/) [![Known Vulnerabilities](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen/badge.svg)](https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-Add [Subresource Integrity (SRI)](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hashes to your Vite build HTML output automatically.
-
-## Features
 
 - Adds integrity attribute to script tags, stylesheet links, and modulepreload links in index.html
 - Works out of the box in production builds
@@ -31,7 +41,7 @@ export default {
       algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
       crossorigin: 'anonymous',  // 'anonymous' | 'use-credentials' | undefined
       fetchCache: true,          // cache remote fetches in-memory and dedupe concurrent requests (default: true)
-      fetchTimeoutMs: 10000,     // abort remote fetches after N ms; 0 disables timeout (default: 5000)
+      fetchTimeoutMs: 5000,     // abort remote fetches after N ms; 0 disables timeout (default: 5000)
     })
   ]
 }
