@@ -72,9 +72,9 @@ Conclusion: SRI is enforced only for build outputs, where assets are content-add
 
 ```ts
 type SriPluginOptions = {
-  algorithm?: 'sha256' | 'sha384' | 'sha512' // default: 'sha384'
-  crossorigin?: 'anonymous' | 'use-credentials' // default: undefined
-  fetchCache?: boolean // default: true (in-memory cache + in-flight dedupe for remote assets)
+  algorithm?: 'sha256' | 'sha384' | 'sha512', // default: 'sha384'
+  crossorigin?: 'anonymous' | 'use-credentials', // default: undefined
+  fetchCache?: boolean, // default: true (in-memory cache + in-flight dedupe for remote assets)
   fetchTimeoutMs?: number // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
 }
 ```
