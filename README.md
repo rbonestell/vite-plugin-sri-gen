@@ -41,7 +41,7 @@ export default {
       algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
       crossorigin: 'anonymous',  // 'anonymous' | 'use-credentials' | undefined
       fetchCache: true,          // cache remote fetches in-memory and dedupe concurrent requests (default: true)
-      fetchTimeoutMs: 5000,     // abort remote fetches after N ms; 0 disables timeout (default: 5000)
+      fetchTimeoutMs: 5000,      // abort remote fetches after N ms; 0 disables timeout (default: 5000)
     })
   ]
 }
