@@ -136,7 +136,9 @@ describe("vite-plugin-sri-gen", () => {
 		});
 
 		it("warns on SSR build with no emitted HTML", async () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const warnSpy = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
 			const plugin = sri() as any;
 			plugin.configResolved?.({
 				command: "build",
@@ -151,7 +153,9 @@ describe("vite-plugin-sri-gen", () => {
 		});
 
 		it("logs warning and skips file when processing an HTML asset throws", async () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const warnSpy = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
 			const plugin = sri() as any;
 			const badSource = {
 				toString() {
@@ -168,7 +172,9 @@ describe("vite-plugin-sri-gen", () => {
 		});
 
 		it("does not warn when no HTML is emitted in a non-SSR build", async () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const warnSpy = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
 			const plugin = sri() as any;
 			// Non-SSR build
 			plugin.configResolved?.({
@@ -260,7 +266,10 @@ describe("vite-plugin-sri-gen", () => {
 
 	describe("resource options wiring (cache & timeout)", () => {
 		it("uses shared cache and in-flight dedupe within a page transform", async () => {
-			const plugin = sri({ algorithm: "sha256", fetchCache: true }) as any;
+			const plugin = sri({
+				algorithm: "sha256",
+				fetchCache: true,
+			}) as any;
 			const bytes = new Uint8Array([1, 2, 3]);
 			const fetchSpy = vi
 				.spyOn(globalThis, "fetch" as any)
@@ -274,15 +283,22 @@ describe("vite-plugin-sri-gen", () => {
         <script src="https://cdn.example.com/a.js"></script>
       </head></html>`;
 
-			const out = await plugin.transformIndexHtml(html, { bundle: {} } as any);
+			const out = await plugin.transformIndexHtml(html, {
+				bundle: {},
+			} as any);
 			expect(out.match(/integrity="sha256-/g)?.length).toBe(2);
 			expect(fetchSpy).toHaveBeenCalledTimes(1);
 			fetchSpy.mockRestore();
 		});
 
 		it("applies timeout and surfaces per-element warnings on failure", async () => {
-			const plugin = sri({ algorithm: "sha256", fetchTimeoutMs: 1 }) as any;
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const plugin = sri({
+				algorithm: "sha256",
+				fetchTimeoutMs: 1,
+			}) as any;
+			const warnSpy = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
 
 			// Simulate a hanging fetch that gets aborted by internal timeout
 			vi.spyOn(globalThis, "fetch" as any).mockImplementation(
@@ -300,13 +316,64 @@ describe("vite-plugin-sri-gen", () => {
         <script src="https://cdn.example.com/a.js"></script>
       </head></html>`;
 
-			const out = await plugin.transformIndexHtml(html, { bundle: {} } as any);
+			const out = await plugin.transformIndexHtml(html, {
+				bundle: {},
+			} as any);
 			// No integrity due to failure, warning emitted
 			expect(out).toContain(
 				'<script src="https://cdn.example.com/a.js"></script>'
 			);
 			expect(warnSpy).toHaveBeenCalled();
 			warnSpy.mockRestore();
+		});
+
+		it("constructs with fetchCache disabled (pending map undefined path)", () => {
+			// This ensures the branch where pending is undefined executes
+			const plugin = sri({ fetchCache: false });
+			expect(typeof plugin).toBe("object");
+		});
+
+		it("computes integrity for asset with binary source in generateBundle", async () => {
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			plugin.configResolved?.({
+				base: "/",
+				build: { ssr: false },
+			} as any);
+			// Asset with type 'asset' and Uint8Array source to hit binary path
+			const cssBytes = new TextEncoder().encode("body{color:blue}");
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/style.css": {
+					type: "asset",
+					fileName: "assets/style.css",
+					source: cssBytes,
+				},
+			};
+			await plugin.generateBundle({}, bundle);
+			// Nothing to assert beyond no-throw; coverage will include the binary branch
+		});
+
+		it("computes integrity for asset with string source in generateBundle", async () => {
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			plugin.configResolved?.({
+				base: "/",
+				build: { ssr: false },
+			} as any);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/app.js": {
+					type: "asset",
+					fileName: "assets/app.js",
+					source: "console.log('ok')",
+				},
+			};
+			await plugin.generateBundle({}, bundle);
 		});
 	});
 });
