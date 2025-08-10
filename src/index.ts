@@ -23,6 +23,8 @@ export interface SriPluginOptions {
 	runtimePatchDynamicLinks?: boolean;
 }
 
+let warn: (msg: string) => void = console.warn;
+
 // Vite plugin to add Subresource Integrity (SRI) attributes to external assets in index.html
 // ESM-only, requires Node 18+ (uses global fetch)
 export default function sri(options: SriPluginOptions = {}): Plugin & {
@@ -55,10 +57,13 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 		// Only run during `vite build`
 		apply: "build",
 
-		configResolved(config: ResolvedConfig) {
+		configResolved(config: ResolvedConfig): void {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
 			isSSR = isSSR || !!config.build?.ssr;
 			base = config.base ?? "/";
+
+			// Use Vite logger if available
+			warn = (this && (this as any).warn?.bind(this)) ?? console.warn;
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -66,9 +71,6 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 				algorithm !== "sha384" &&
 				algorithm !== "sha512"
 			) {
-				// use vite logger if available
-				const warn: (msg: string) => void =
-					(this && (this as any).warn?.bind(this)) ?? console.warn;
 				warn(
 					`Unsupported algorithm "${String(
 						algorithm
@@ -236,7 +238,10 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 		},
 
 		// Prepend a tiny runtime to entry chunks to set integrity on dynamic <link>/<script>
-		renderChunk(code: string, chunk: any) {
+		renderChunk(
+			code: string,
+			chunk: any
+		): { code: string; map: null } | null {
 			if (!runtimePatchDynamicLinks) return null;
 			if (!(chunk as OutputChunk).isEntry) return null;
 
