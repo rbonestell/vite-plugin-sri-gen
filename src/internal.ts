@@ -14,7 +14,7 @@ import type { OutputAsset, OutputBundle, OutputChunk } from "rollup";
  * Info messages are only logged in development mode to reduce noise in production.
  */
 export interface BundleLogger {
-	/** Log informational messages (development mode only) */
+	/** Log informational messages */
 	info(message: string): void;
 	/** Log warning messages with plugin context fallback */
 	warn(message: string): void;
@@ -388,6 +388,7 @@ export async function processElement(
 export async function addSriToHtml(
 	html: string,
 	bundle: BundleLike,
+	logger: BundleLogger,
 	{
 		algorithm = "sha384",
 		crossorigin,
@@ -420,7 +421,7 @@ export async function addSriToHtml(
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
 					const src = $node.attr("src") || $node.attr("href");
-					console.warn(
+					logger.error(
 						`Failed to compute integrity for ${src}:`,
 						err?.message || err
 					);
@@ -453,54 +454,22 @@ export async function addSriToHtml(
  * @returns Logger interface with info, warn, and error methods
  */
 export function createLogger(pluginContext: any): BundleLogger {
-	// Extract plugin logger if available and valid
-	const pluginLogger =
-		pluginContext && typeof pluginContext.warn === "function"
-			? pluginContext.warn.bind(pluginContext)
-			: null;
-
-	return {
-		/**
-		 * Logs informational messages in development mode only.
-		 * Production builds suppress info logs to reduce noise.
-		 */
-		info: (msg: string) => {
-			if (process.env.NODE_ENV === "development") {
-				console.info(`[vite-plugin-sri-gen] ${msg}`);
-			}
-		},
-
-		/**
-		 * Logs warning messages with plugin context fallback.
-		 * Uses plugin logger if available, otherwise falls back to console.
-		 */
-		warn: (msg: string) => {
-			if (pluginLogger) {
-				pluginLogger(msg);
-			} else {
-				console.warn(`[vite-plugin-sri-gen] ${msg}`);
-			}
-		},
-
-		/**
-		 * Logs error messages with optional stack trace support.
-		 * Shows stack traces in development mode for detailed debugging.
-		 */
-		error: (msg: string, error?: Error) => {
-			const fullMessage = `[vite-plugin-sri-gen] ${msg}`;
-
-			if (pluginLogger) {
-				pluginLogger(fullMessage);
-			} else {
-				console.error(fullMessage);
-			}
-
-			// Show stack traces in development for debugging
-			if (error && process.env.NODE_ENV === "development") {
-				console.error("Stack trace:", error.stack);
-			}
-		},
-	};
+	if (pluginContext && typeof pluginContext.warn === "function") {
+		return {
+			warn: pluginContext.warn.bind(pluginContext),
+			info: pluginContext.info.bind(pluginContext),
+			error: pluginContext.error.bind(pluginContext),
+		} as BundleLogger;
+	} else {
+		return {
+			warn: (msg: string) => console.warn(`[vite-plugin-sri-gen] ${msg}`),
+			info: (msg: string, ...args: any[]) =>
+				console.info(`[vite-plugin-sri-gen] ${msg}`),
+			error: (msg: string, error?: Error, ...args: any[]) => {
+				console.error(`[vite-plugin-sri-gen] ${msg}`, error);
+			},
+		} as BundleLogger;
+	}
 }
 
 /**
@@ -1295,7 +1264,7 @@ export class HtmlProcessor {
 		htmlContent: string,
 		bundle: OutputBundle
 	): Promise<string> {
-		return addSriToHtml(htmlContent, bundle as any, {
+		return addSriToHtml(htmlContent, bundle as any, this.config.logger, {
 			algorithm: this.config.algorithm,
 			crossorigin: this.config.crossorigin,
 			resourceOpts: {
