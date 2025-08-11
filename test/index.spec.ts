@@ -1084,7 +1084,10 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Should throw and call handleGenerateBundleError
-			// This test primarily covers the validation path, not actual error throwing\n\t\t\t// The bundle with null code will be handled gracefully (skipped) not thrown\n\t\t\tconst result = await plugin.generateBundle({}, bundle);\n\t\t\texpect(result).toBeUndefined();
+			// This test primarily covers the validation path, not actual error throwing.
+			// The bundle with null code will be handled gracefully (skipped), not thrown.
+			const result = await plugin.generateBundle({}, bundle);
+			expect(result).toBeUndefined();
 		});
 
 		it("covers production mode (no info logging)", async () => {
