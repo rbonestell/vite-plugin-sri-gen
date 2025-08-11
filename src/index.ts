@@ -1,8 +1,8 @@
 import type { OutputBundle } from "rollup";
 import type { IndexHtmlTransformContext, Plugin, ResolvedConfig } from "vite";
+import type { BundleLogger } from "./internal";
 import {
 	addSriToHtml,
-	BundleLogger,
 	createLogger,
 	DynamicImportAnalyzer,
 	handleGenerateBundleError,

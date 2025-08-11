@@ -463,9 +463,8 @@ export function createLogger(pluginContext: any): BundleLogger {
 	} else {
 		return {
 			warn: (msg: string) => console.warn(`[vite-plugin-sri-gen] ${msg}`),
-			info: (msg: string, ...args: any[]) =>
-				console.info(`[vite-plugin-sri-gen] ${msg}`),
-			error: (msg: string, error?: Error, ...args: any[]) => {
+			info: (msg: string) => console.info(`[vite-plugin-sri-gen] ${msg}`),
+			error: (msg: string, error?: Error) => {
 				console.error(`[vite-plugin-sri-gen] ${msg}`, error);
 			},
 		} as BundleLogger;
