@@ -17,6 +17,8 @@
 
 - Adds integrity attribute to script tags, stylesheet links, and modulepreload links in index.html
 - Works out of the box in production builds
+- Optionally injects rel="modulepreload" with integrity for lazy-loaded chunks
+- Optionally injects a tiny CSP-safe runtime that adds integrity/crossorigin to dynamically inserted \<script\>/\<link\>
 - Build-only by design (no dev server SRI)
 - Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
 - Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
@@ -49,6 +51,8 @@ export default {
 
 During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
 
+Advanced (optional): you can enable automatic rel="modulepreload" injection for lazy-loaded chunks and a CSP-safe runtime patch that sets integrity on dynamically inserted tags. See the Configuration section.
+
 TypeScript/ESM notes:
 
 - The package ships ESM only with types. Import as `import sri from 'vite-plugin-sri-gen'`.
@@ -75,7 +79,9 @@ type SriPluginOptions = {
   algorithm?: 'sha256' | 'sha384' | 'sha512', // default: 'sha384'
   crossorigin?: 'anonymous' | 'use-credentials', // default: undefined
   fetchCache?: boolean, // default: true (in-memory cache + in-flight dedupe for remote assets)
-  fetchTimeoutMs?: number // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
+  fetchTimeoutMs?: number, // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
+  preloadDynamicChunks?: boolean, // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks
+  runtimePatchDynamicLinks?: boolean, // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
 }
 ```
 
@@ -88,6 +94,11 @@ Notes:
 - Invalid or unsupported algorithms are automatically replaced with 'sha384' and a warning is logged.
 - Caching: when enabled, remote fetches are cached in-memory per build and concurrent requests are deduplicated.
 - Timeout: when a non-zero fetchTimeoutMs is set, slow remote fetches are aborted and the affected elements are left unchanged (a warning is logged).
+
+### Lazy-loaded chunks and dynamic tags
+
+- If `preloadDynamicChunks` is enabled (default), the plugin scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` for them into emitted HTML, honoring Vite `base` and `crossorigin`.
+- If `runtimePatchDynamicLinks` is enabled (default), a tiny runtime is prepended to entry chunks. It sets `integrity` (and `crossorigin` if configured) on dynamically created `<script>` and `<link>` elements for eligible resources (scripts, stylesheets, modulepreload, or preload as=script/style/font) before the network request happens. This is bundled code (not inline) and is CSP-safe.
 
 ## Compatibility
 

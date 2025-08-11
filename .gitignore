@@ -1,3 +1,9 @@
+### AI Tooling ###
+# Ignore misc AI tooling project configs, add exceptions for any intentionally shared
+.claude/*
+.serena/*
+.kilocode/*
+
 ### Node ###
 # Logs
 logs

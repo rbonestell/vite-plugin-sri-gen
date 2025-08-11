@@ -1,6 +1,22 @@
-import type { IndexHtmlTransformContext, Plugin } from "vite";
-import { addSriToHtml, type LoadResourceOptions } from "./internal";
+import type { OutputBundle } from "rollup";
+import type { IndexHtmlTransformContext, Plugin, ResolvedConfig } from "vite";
+import type { BundleLogger } from "./internal";
+import {
+	addSriToHtml,
+	createLogger,
+	DynamicImportAnalyzer,
+	handleGenerateBundleError,
+	HtmlProcessor,
+	installSriRuntime,
+	IntegrityProcessor,
+	validateGenerateBundleInputs,
+	type LoadResourceOptions,
+} from "./internal";
 
+/**
+ * Configuration options for the SRI plugin.
+ * Defines all available settings for customizing SRI generation behavior.
+ */
 export interface SriPluginOptions {
 	/** The hashing algorithm to use for generating SRI hashes. */
 	algorithm?: "sha256" | "sha384" | "sha512";
@@ -10,10 +26,21 @@ export interface SriPluginOptions {
 	fetchCache?: boolean;
 	/** Abort remote fetches after the given milliseconds. Default: 5000 (0 disables). */
 	fetchTimeoutMs?: number;
+	/** Add rel="modulepreload" with integrity for discovered dynamic chunks. Default: true */
+	preloadDynamicChunks?: boolean;
+	/** Inject a tiny runtime that sets integrity on dynamically inserted <script>/<link>. Default: true */
+	runtimePatchDynamicLinks?: boolean;
 }
 
-// Vite plugin to add Subresource Integrity (SRI) attributes to external assets in index.html
-// ESM-only, requires Node 18+ (uses global fetch)
+let logger: BundleLogger;
+
+/**
+ * Vite plugin to add Subresource Integrity (SRI) attributes to external assets in index.html
+ * ESM-only, requires Node 18+ (uses global fetch)
+ *
+ * @param options - Configuration options for the plugin
+ * @returns Vite plugin with SRI processing capabilities
+ */
 export default function sri(options: SriPluginOptions = {}): Plugin & {
 	transformIndexHtml(
 		html: string,
@@ -30,15 +57,24 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 		? new Map<string, Promise<Uint8Array>>()
 		: undefined;
 	let isSSR = false;
+	const preloadDynamicChunks = options.preloadDynamicChunks !== false; // default true
+	const runtimePatchDynamicLinks = options.runtimePatchDynamicLinks !== false; // default true
+
+	// Build-time state
+	let base = "/";
+	let sriByPathname: Record<string, string> = {};
+	let dynamicChunkFiles: Set<string> = new Set();
 
 	return {
 		name: "vite-plugin-sri-gen",
 		enforce: "post",
 		// Only run during `vite build`
 		apply: "build",
-		configResolved(config: import("vite").ResolvedConfig) {
+
+		configResolved(config: ResolvedConfig): void {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
 			isSSR = isSSR || !!config.build?.ssr;
+			base = config.base ?? "/";
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -46,10 +82,7 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 				algorithm !== "sha384" &&
 				algorithm !== "sha512"
 			) {
-				// use vite logger if available
-				const warn: (msg: string) => void =
-					(this && (this as any).warn?.bind(this)) ?? console.warn;
-				warn(
+				logger.warn(
 					`Unsupported algorithm "${String(
 						algorithm
 					)}". Falling back to "sha384". Supported: sha256 | sha384 | sha512.`
@@ -68,67 +101,103 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 				enableCache,
 				fetchTimeoutMs,
 			};
-			return addSriToHtml(html, context?.bundle as any, {
+			return addSriToHtml(html, context?.bundle as any, logger, {
 				algorithm,
 				crossorigin,
 				resourceOpts,
 			});
 		},
 
-		async generateBundle(
-			_options: unknown,
-			bundle: import("rollup").OutputBundle
-		) {
-			// Use Vite/Rollup logger when available, fallback to console.warn otherwise
-			const warn: (msg: string) => void =
-				this && typeof (this as any).warn === "function"
-					? (this as any).warn.bind(this)
-					: console.warn;
-			// Add SRI to any emitted HTML files (useful for MPA and SSR prerendered outputs)
-			// This runs for both client and SSR builds; we only modify .html assets if present.
-			const htmlFiles = Object.entries(bundle).filter(
-				([fileName, out]) => {
-					return (
-						fileName.toLowerCase().endsWith(".html") &&
-						out &&
-						(out as any).type === "asset"
-					);
+		async generateBundle(_options: unknown, bundle: OutputBundle) {
+			/**
+			 * Main entry point for bundle generation with SRI processing.
+			 * This function orchestrates the entire SRI generation workflow:
+			 * 1. Validates input parameters and initializes logging
+			 * 2. Builds integrity mappings for all processable assets
+			 * 3. Discovers and maps dynamic import relationships
+			 * 4. Processes HTML files to inject SRI attributes and preload links
+			 *
+			 * @param _options - Rollup generation options (unused but required by interface)
+			 * @param bundle - Output bundle containing all generated assets and chunks
+			 * @returns Promise<void> - Completes when all SRI processing is finished
+			 */
+
+			// Initialize robust logging system with fallback chain
+			logger = createLogger(this);
+
+			try {
+				// Step 1: Validate inputs and early return conditions
+				const validationResult = validateGenerateBundleInputs(
+					bundle,
+					isSSR
+				);
+				if (!validationResult.isValid) {
+					if (
+						validationResult.shouldWarn &&
+						validationResult.message
+					) {
+						logger.warn(validationResult.message);
+					}
+					return;
 				}
-			);
-			if (htmlFiles.length === 0) {
-				if (isSSR) {
-					warn(
-						"No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped."
-					);
-				}
-				return;
+
+				// Step 2: Build comprehensive integrity mappings for all assets
+				logger.info(
+					"Building SRI integrity mappings for bundle assets"
+				);
+				const integrityProcessor = new IntegrityProcessor(
+					algorithm,
+					logger
+				);
+				sriByPathname = await integrityProcessor.buildIntegrityMappings(
+					bundle
+				);
+
+				// Step 3: Discover and map dynamic import relationships
+				logger.info("Analyzing dynamic import relationships");
+				const dynamicImportAnalyzer = new DynamicImportAnalyzer(logger);
+				dynamicChunkFiles =
+					dynamicImportAnalyzer.analyzeDynamicImports(bundle);
+
+				// Step 4: Process HTML files with comprehensive error handling
+				logger.info("Processing HTML files for SRI injection");
+				const htmlProcessor = new HtmlProcessor({
+					algorithm,
+					crossorigin,
+					base,
+					preloadDynamicChunks,
+					enableCache,
+					remoteCache,
+					pending,
+					fetchTimeoutMs,
+					logger,
+				});
+
+				await htmlProcessor.processHtmlFiles(
+					bundle,
+					sriByPathname,
+					dynamicChunkFiles
+				);
+
+				logger.info("SRI generation completed successfully");
+			} catch (error) {
+				handleGenerateBundleError(error, logger);
+				throw error; // Re-throw to maintain error propagation
 			}
-			for (const [fileName, asset] of htmlFiles as any) {
-				try {
-					const html =
-						typeof (asset as any).source === "string"
-							? (asset as any).source
-							: String((asset as any).source || "");
-					const updated = await addSriToHtml(html, bundle as any, {
-						algorithm,
-						crossorigin,
-						resourceOpts: {
-							cache: remoteCache,
-							pending,
-							enableCache,
-							fetchTimeoutMs,
-						},
-					});
-					(asset as any).source = updated;
-				} catch (err: any) {
-					// Non-fatal: skip file on error
-					warn(
-						`Failed to add SRI to ${fileName}: ${
-							err?.message || err
-						}`
-					);
-				}
-			}
+		},
+
+		// Prepend a tiny runtime to entry chunks to set integrity on dynamic <link>/<script>
+		renderChunk(
+			code: string,
+			chunk: any
+		): { code: string; map: null } | null {
+			if (!runtimePatchDynamicLinks) return null;
+			if (!(chunk as any).isEntry) return null;
+
+			const serializedMap = JSON.stringify(sriByPathname);
+			const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
+			const injected = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors} });\n`;
+			return { code: injected + code, map: null };
 		},
 	} as any;
 }
