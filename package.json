@@ -11,7 +11,7 @@
 		}
 	},
 	"scripts": {
-		"build": "tsup src/index.ts --format esm --dts --clean --out-dir dist --target node18",
+		"build": "tsup",
 		"clean": "rimraf dist",
 		"prepare": "npm run build",
 		"prepublishOnly": "npm run build",
