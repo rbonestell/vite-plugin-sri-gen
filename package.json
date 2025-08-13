@@ -74,9 +74,11 @@
 		"vite": ">=4.0.0"
 	},
 	"dependencies": {
-		"cheerio": "^1.1.2"
+		"parse5": "^8.0.0"
 	},
 	"devDependencies": {
+		"@types/parse5": "^7.0.0",
+		"@types/node": "^22.7.9",
 		"@typescript-eslint/eslint-plugin": "^8.12.2",
 		"@typescript-eslint/parser": "^8.12.2",
 		"@vitest/coverage-v8": "^3.2.4",
@@ -85,7 +87,6 @@
 		"rimraf": "^6.0.1",
 		"tsup": "^8.3.5",
 		"typescript": "^5.6.3",
-		"@types/node": "^22.7.9",
 		"vitest": "^3.2.4"
 	}
 }

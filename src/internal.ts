@@ -1,7 +1,14 @@
-import { load } from "cheerio";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import type { DefaultTreeAdapterTypes, Token } from "parse5";
+import { parse, serialize } from "parse5";
 import type { OutputAsset, OutputBundle, OutputChunk } from "rollup";
+
+// Use public parse5 types instead of deep import
+type Document = DefaultTreeAdapterTypes.Document;
+type Element = DefaultTreeAdapterTypes.Element;
+type ChildNode = DefaultTreeAdapterTypes.ChildNode;
+
 // =======================================================
 // #region INTERFACES AND TYPES
 // =======================================================
@@ -14,12 +21,12 @@ import type { OutputAsset, OutputBundle, OutputChunk } from "rollup";
  * Info messages are only logged in development mode to reduce noise in production.
  */
 export interface BundleLogger {
-	/** Log informational messages */
-	info(message: string): void;
-	/** Log warning messages with plugin context fallback */
-	warn(message: string): void;
-	/** Log error messages with optional Error object for detailed stack traces */
-	error(message: string, error?: Error): void;
+  /** Log informational messages */
+  info(message: string): void;
+  /** Log warning messages with plugin context fallback */
+  warn(message: string): void;
+  /** Log error messages with optional Error object for detailed stack traces */
+  error(message: string, error?: Error): void;
 }
 
 /**
@@ -30,12 +37,12 @@ export interface BundleLogger {
  * and determine whether warnings should be displayed to users.
  */
 export interface ValidationResult {
-	/** Whether the validation passed successfully */
-	isValid: boolean;
-	/** Whether a warning message should be displayed to the user */
-	shouldWarn: boolean;
-	/** Optional warning message text (null if no warning needed) */
-	message: string | null;
+  /** Whether the validation passed successfully */
+  isValid: boolean;
+  /** Whether a warning message should be displayed to the user */
+  shouldWarn: boolean;
+  /** Optional warning message text (null if no warning needed) */
+  message: string | null;
 }
 
 /**
@@ -46,24 +53,24 @@ export interface ValidationResult {
  * This configuration drives both SRI injection and dynamic chunk preloading.
  */
 export interface HtmlProcessorConfig {
-	/** Hash algorithm for integrity computation */
-	algorithm: "sha256" | "sha384" | "sha512";
-	/** CORS setting for integrity-enabled resources */
-	crossorigin?: "anonymous" | "use-credentials";
-	/** Base path for generating absolute URLs */
-	base: string;
-	/** Whether to inject modulepreload links for dynamic chunks */
-	preloadDynamicChunks: boolean;
-	/** Whether to enable HTTP caching for remote resources */
-	enableCache: boolean;
-	/** HTTP cache storage for remote resource bytes */
-	remoteCache?: Map<string, Uint8Array>;
-	/** In-flight request deduplication map */
-	pending?: Map<string, Promise<Uint8Array>>;
-	/** HTTP request timeout in milliseconds (0 = disabled) */
-	fetchTimeoutMs: number;
-	/** Logger instance for consistent error reporting */
-	logger: BundleLogger;
+  /** Hash algorithm for integrity computation */
+  algorithm: "sha256" | "sha384" | "sha512";
+  /** CORS setting for integrity-enabled resources */
+  crossorigin?: "anonymous" | "use-credentials";
+  /** Base path for generating absolute URLs */
+  base: string;
+  /** Whether to inject modulepreload links for dynamic chunks */
+  preloadDynamicChunks: boolean;
+  /** Whether to enable HTTP caching for remote resources */
+  enableCache: boolean;
+  /** HTTP cache storage for remote resource bytes */
+  remoteCache?: Map<string, Uint8Array>;
+  /** In-flight request deduplication map */
+  pending?: Map<string, Promise<Uint8Array>>;
+  /** HTTP request timeout in milliseconds (0 = disabled) */
+  fetchTimeoutMs: number;
+  /** Logger instance for consistent error reporting */
+  logger: BundleLogger;
 }
 
 // #endregion
@@ -163,14 +170,14 @@ function findBundleItem(
  * Controls caching, timeouts, and request deduplication behavior.
  */
 export type LoadResourceOptions = {
-	/** HTTP response cache for storing fetched bytes */
-	cache?: Map<string, Uint8Array>;
-	/** Whether caching is enabled (default: true) */
-	enableCache?: boolean;
-	/** HTTP request timeout in milliseconds (0 = disabled) */
-	fetchTimeoutMs?: number;
-	/** In-flight request deduplication map */
-	pending?: Map<string, Promise<Uint8Array>>;
+  /** HTTP response cache for storing fetched bytes */
+  cache?: Map<string, Uint8Array>;
+  /** Whether caching is enabled (default: true) */
+  enableCache?: boolean;
+  /** HTTP request timeout in milliseconds (0 = disabled) */
+  fetchTimeoutMs?: number;
+  /** In-flight request deduplication map */
+  pending?: Map<string, Promise<Uint8Array>>;
 };
 
 /**
@@ -228,8 +235,8 @@ export async function loadResource(
 
 		if (
 			fetchTimeoutMs &&
-			fetchTimeoutMs > 0 &&
-			typeof AbortController !== "undefined"
+      fetchTimeoutMs > 0 &&
+      typeof AbortController !== "undefined"
 		) {
 			controller = new AbortController();
 			signal = controller.signal;
@@ -240,10 +247,7 @@ export async function loadResource(
 		const doFetch = async (): Promise<Uint8Array> => {
 			let res: Response;
 			try {
-				res = await fetch(
-					url,
-					signal ? { signal } : (undefined as any)
-				);
+				res = await fetch(url, signal ? { signal } : (undefined as any));
 			} finally {
 				// Always clear timeout to prevent memory leaks
 				if (timeoutId) clearTimeout(timeoutId);
@@ -309,21 +313,79 @@ export function computeIntegrity(
 	algorithm: "sha256" | "sha384" | "sha512"
 ): string {
 	const buf =
-		typeof source === "string" ? Buffer.from(source) : Buffer.from(source);
+    typeof source === "string" ? Buffer.from(source) : Buffer.from(source);
 	const digest = createHash(algorithm).update(buf).digest("base64");
 	return `${algorithm}-${digest}`;
 }
 
 /**
- * Determines the appropriate URL attribute name for a DOM element.
+ * Determines the appropriate URL attribute name for a parse5 Element.
  * Script elements use "src", all other elements use "href" by default.
  *
- * @param el - DOM element-like object with name property
+ * @param element - parse5 Element node
  * @returns "src" for script elements, "href" for others, null if invalid
  */
-export function getUrlAttrName(el: any): "src" | "href" | null {
-	if (!el || !el.name) return null;
-	return el.name.toLowerCase() === "script" ? "src" : "href";
+export function getUrlAttrName(element: Element): "src" | "href" | null {
+	if (!element || !element.nodeName) return null;
+	return element.nodeName.toLowerCase() === "script" ? "src" : "href";
+}
+
+/**
+ * Helper function to find elements in parse5 document tree
+ * @param node - Current node to search
+ * @param predicate - Function to test each element
+ * @returns Array of matching elements
+ */
+function findElements(
+	node: Document | Element | ChildNode,
+	predicate: (element: Element) => boolean
+): Element[] {
+	const results: Element[] = [];
+
+	function traverse(current: Document | Element | ChildNode): void {
+		// Type guard to check if current node is an Element
+		if (
+			"nodeName" in current &&
+      "attrs" in current &&
+      predicate(current as Element)
+		) {
+			results.push(current as Element);
+		}
+		if ("childNodes" in current && current.childNodes) {
+			for (const child of current.childNodes) {
+				traverse(child);
+			}
+		}
+	}
+
+	traverse(node);
+	return results;
+}
+
+/**
+ * Helper function to get attribute value from parse5 element
+ * @param element - parse5 Element
+ * @param name - Attribute name
+ * @returns Attribute value or undefined
+ */
+function getAttrValue(element: Element, name: string): string | undefined {
+	const attr = element.attrs.find((a: Token.Attribute) => a.name === name);
+	return attr?.value;
+}
+
+/**
+ * Helper function to set attribute value on parse5 element
+ * @param element - parse5 Element
+ * @param name - Attribute name
+ * @param value - Attribute value
+ */
+function setAttrValue(element: Element, name: string, value: string): void {
+	const existingAttr = element.attrs.find((a: Token.Attribute) => a.name === name);
+	if (existingAttr) {
+		existingAttr.value = value;
+	} else {
+		element.attrs.push({ name, value });
+	}
 }
 
 /**
@@ -331,30 +393,29 @@ export function getUrlAttrName(el: any): "src" | "href" | null {
  * Loads the resource content, computes integrity, and updates element attributes.
  * Skips elements that already have integrity attributes to avoid conflicts.
  *
- * @param $el - Cheerio-wrapped element
+ * @param element - parse5 Element node
  * @param bundle - Bundle for resource lookup
  * @param algorithm - Hash algorithm for integrity computation
  * @param crossorigin - CORS setting to apply
  * @param resourceOpts - Resource loading configuration
  */
 export async function processElement(
-	$el: any,
+	element: Element,
 	bundle: BundleLike,
 	algorithm: "sha256" | "sha384" | "sha512",
 	crossorigin?: "anonymous" | "use-credentials",
 	resourceOpts?: LoadResourceOptions
 ): Promise<void> {
-	const el = $el.get(0);
-	if (!el || !el.attribs) return;
+	if (!element || !element.attrs) return;
 
 	// Skip elements that already have integrity
-	if (el.attribs.integrity) return;
+	if (getAttrValue(element, "integrity")) return;
 
 	// Determine the URL attribute name (src or href)
-	const attrName = getUrlAttrName(el);
+	const attrName = getUrlAttrName(element);
 	if (!attrName) return;
 
-	const resourcePath = el.attribs[attrName];
+	const resourcePath = getAttrValue(element, attrName);
 	if (!resourcePath) return;
 
 	// Load and process the resource
@@ -363,10 +424,44 @@ export async function processElement(
 
 	// Compute and apply integrity
 	const integrity = computeIntegrity(source as any, algorithm);
-	$el.attr("integrity", integrity);
+	setAttrValue(element, "integrity", integrity);
 
 	// Apply crossorigin if specified
-	if (crossorigin) $el.attr("crossorigin", crossorigin);
+	if (crossorigin) {
+		setAttrValue(element, "crossorigin", crossorigin);
+	}
+}
+
+/**
+ * Checks if an element matches the SRI-eligible criteria
+ * @param element - parse5 Element to check
+ * @returns true if element should have SRI attributes added
+ */
+function isEligibleForSri(element: Element): boolean {
+	if (!element.nodeName || !element.attrs) return false;
+
+	const tagName = element.nodeName.toLowerCase();
+	const rel = getAttrValue(element, "rel")?.toLowerCase();
+	const as = getAttrValue(element, "as")?.toLowerCase();
+
+	// Script elements with src attribute
+	if (tagName === "script" && getAttrValue(element, "src")) {
+		return true;
+	}
+
+	// Link elements with href attribute
+	if (tagName === "link" && getAttrValue(element, "href")) {
+		// Stylesheet links
+		if (rel === "stylesheet") return true;
+
+		// Module preload links
+		if (rel === "modulepreload") return true;
+
+		// Preload links for scripts or styles
+		if (rel === "preload" && (as === "script" || as === "style")) return true;
+	}
+
+	return false;
 }
 
 /**
@@ -382,6 +477,7 @@ export async function processElement(
  *
  * @param html - HTML content to process
  * @param bundle - Bundle for resource resolution
+ * @param logger - Logger for error reporting
  * @param options - Processing configuration options
  * @returns Promise resolving to HTML with SRI attributes added
  */
@@ -394,42 +490,53 @@ export async function addSriToHtml(
 		crossorigin,
 		resourceOpts,
 	}: {
-		algorithm?: "sha256" | "sha384" | "sha512";
-		crossorigin?: "anonymous" | "use-credentials";
-		resourceOpts?: LoadResourceOptions;
-	} = {}
+    algorithm?: "sha256" | "sha384" | "sha512";
+    crossorigin?: "anonymous" | "use-credentials";
+    resourceOpts?: LoadResourceOptions;
+  } = {}
 ): Promise<string> {
-	const $ = load(html);
+	try {
+		// Parse the HTML using parse5
+		const document = parse(html, {
+			sourceCodeLocationInfo: false,
+		});
 
-	// Select all eligible elements for SRI processing
-	const $elements = $(
-		'script[src], link[rel="stylesheet"][href], link[rel="modulepreload"][href], link[rel="preload"][as="script" i][href], link[rel="preload"][as="style" i][href]'
-	);
+		// Find all eligible elements for SRI processing
+		const eligibleElements = findElements(document, isEligibleForSri);
 
-	// Process all elements in parallel with error handling
-	await Promise.all(
-		$elements
-			.toArray()
-			.map((node) => $(node))
-			.map(($node) =>
+		// Process all elements in parallel with error handling
+		await Promise.all(
+			eligibleElements.map((element) =>
 				processElement(
-					$node,
+					element,
 					bundle,
 					algorithm,
 					crossorigin,
 					resourceOpts
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
-					const src = $node.attr("src") || $node.attr("href");
+					const src =
+            getAttrValue(element, "src") ||
+            getAttrValue(element, "href") ||
+            "unknown";
 					logger.error(
 						`Failed to compute integrity for ${src}:`,
 						err?.message || err
 					);
 				})
 			)
-	);
+		);
 
-	return $.html();
+		// Serialize the document back to HTML
+		return serialize(document);
+	} catch (error) {
+		logger.error(
+			"Failed to parse HTML with parse5",
+			error instanceof Error ? error : undefined
+		);
+		// Fallback to returning original HTML
+		return html;
+	}
 }
 
 // #endregion
@@ -499,7 +606,7 @@ export function validateGenerateBundleInputs(
 			isValid: false,
 			shouldWarn: true,
 			message:
-				"Invalid bundle provided to generateBundle. Bundle must be a valid object.",
+        "Invalid bundle provided to generateBundle. Bundle must be a valid object.",
 		};
 	}
 
@@ -513,7 +620,7 @@ export function validateGenerateBundleInputs(
 			isValid: false,
 			shouldWarn: true,
 			message:
-				"Empty bundle detected. No assets to process for SRI generation.",
+        "Empty bundle detected. No assets to process for SRI generation.",
 		};
 	}
 
@@ -525,8 +632,8 @@ export function validateGenerateBundleInputs(
 	const hasHtmlFiles = bundleEntries.some(
 		([fileName, asset]) =>
 			fileName.toLowerCase().endsWith(".html") &&
-			asset &&
-			(asset as any).type === "asset"
+      asset &&
+      (asset as any).type === "asset"
 	);
 
 	if (!hasHtmlFiles) {
@@ -536,7 +643,7 @@ export function validateGenerateBundleInputs(
 				isValid: false,
 				shouldWarn: true,
 				message:
-					"No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.",
+          "No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.",
 			};
 		}
 
@@ -630,45 +737,42 @@ export class IntegrityProcessor {
 	private readonly logger: BundleLogger;
 
 	/**
-	 * File extension patterns for assets that should have integrity computed.
-	 * Includes common JavaScript and CSS variations with query parameter support.
-	 *
-	 * Supported Extensions:
-	 * - .css - Stylesheets
-	 * - .js - JavaScript modules
-	 * - .mjs - ECMAScript modules
-	 * - Query parameters are preserved (e.g., .js?version=123)
-	 */
+   * File extension patterns for assets that should have integrity computed.
+   * Includes common JavaScript and CSS variations with query parameter support.
+   *
+   * Supported Extensions:
+   * - .css - Stylesheets
+   * - .js - JavaScript modules
+   * - .mjs - ECMAScript modules
+   * - Query parameters are preserved (e.g., .js?version=123)
+   */
 	private readonly PROCESSABLE_EXTENSIONS = /\.(css|js|mjs)($|\?)/i;
 
 	/**
-	 * Constructs a new IntegrityProcessor with specified algorithm and logger.
-	 *
-	 * @param algorithm - Hash algorithm for integrity computation
-	 * @param logger - Logger instance for consistent reporting
-	 */
-	constructor(
-		algorithm: "sha256" | "sha384" | "sha512",
-		logger: BundleLogger
-	) {
+   * Constructs a new IntegrityProcessor with specified algorithm and logger.
+   *
+   * @param algorithm - Hash algorithm for integrity computation
+   * @param logger - Logger instance for consistent reporting
+   */
+	constructor(algorithm: "sha256" | "sha384" | "sha512", logger: BundleLogger) {
 		this.algorithm = algorithm;
 		this.logger = logger;
 	}
 
 	/**
-	 * Builds comprehensive integrity mappings for all processable assets in the bundle.
-	 * Processes both chunks (with code) and assets (with source) while maintaining
-	 * proper error boundaries for individual asset failures.
-	 *
-	 * Processing Flow:
-	 * 1. Extract all bundle entries for processing
-	 * 2. Process entries in parallel with individual error handling
-	 * 3. Collect results and statistics
-	 * 4. Log processing summary
-	 *
-	 * @param bundle - Output bundle containing assets and chunks
-	 * @returns Promise<Record<string, string>> - Mapping of pathname to integrity hash
-	 */
+   * Builds comprehensive integrity mappings for all processable assets in the bundle.
+   * Processes both chunks (with code) and assets (with source) while maintaining
+   * proper error boundaries for individual asset failures.
+   *
+   * Processing Flow:
+   * 1. Extract all bundle entries for processing
+   * 2. Process entries in parallel with individual error handling
+   * 3. Collect results and statistics
+   * 4. Log processing summary
+   *
+   * @param bundle - Output bundle containing assets and chunks
+   * @returns Promise<Record<string, string>> - Mapping of pathname to integrity hash
+   */
 	async buildIntegrityMappings(
 		bundle: OutputBundle
 	): Promise<Record<string, string>> {
@@ -689,10 +793,7 @@ export class IntegrityProcessor {
 		const processingPromises = bundleEntries.map(
 			async ([fileName, bundleItem]) => {
 				try {
-					const result = await this.processBundleItem(
-						fileName,
-						bundleItem
-					);
+					const result = await this.processBundleItem(fileName, bundleItem);
 					if (result) {
 						integrityMap[result.pathname] = result.integrity;
 						processedCount++;
@@ -703,9 +804,7 @@ export class IntegrityProcessor {
 					// Log error but continue processing other items
 					this.logger.error(
 						`Failed to process bundle item ${fileName}: ${
-							error instanceof Error
-								? error.message
-								: String(error)
+							error instanceof Error ? error.message : String(error)
 						}`,
 						error instanceof Error ? error : undefined
 					);
@@ -729,19 +828,19 @@ export class IntegrityProcessor {
 	}
 
 	/**
-	 * Processes an individual bundle item (asset or chunk) for integrity computation.
-	 * Handles type discrimination and source extraction with proper validation.
-	 *
-	 * Processing Steps:
-	 * 1. Check file extension against processable patterns
-	 * 2. Extract source content based on item type (asset vs chunk)
-	 * 3. Compute integrity hash
-	 * 4. Generate pathname for mapping
-	 *
-	 * @param fileName - Name of the file in the bundle
-	 * @param bundleItem - The bundle item (asset or chunk)
-	 * @returns Promise<{pathname: string, integrity: string} | null> - Result or null if skipped
-	 */
+   * Processes an individual bundle item (asset or chunk) for integrity computation.
+   * Handles type discrimination and source extraction with proper validation.
+   *
+   * Processing Steps:
+   * 1. Check file extension against processable patterns
+   * 2. Extract source content based on item type (asset vs chunk)
+   * 3. Compute integrity hash
+   * 4. Generate pathname for mapping
+   *
+   * @param fileName - Name of the file in the bundle
+   * @param bundleItem - The bundle item (asset or chunk)
+   * @returns Promise<{pathname: string, integrity: string} | null> - Result or null if skipped
+   */
 	private async processBundleItem(
 		fileName: string,
 		bundleItem: OutputChunk | OutputAsset
@@ -765,9 +864,7 @@ export class IntegrityProcessor {
 		if (bundleItem.type === "asset") {
 			const asset = bundleItem as OutputAsset;
 			if (!asset.source) {
-				this.logger.warn(
-					`Asset ${fileName} has no source content, skipping`
-				);
+				this.logger.warn(`Asset ${fileName} has no source content, skipping`);
 				return null;
 			}
 
@@ -781,18 +878,14 @@ export class IntegrityProcessor {
 		else if (bundleItem.type === "chunk") {
 			const chunk = bundleItem as OutputChunk;
 			if (!chunk.code) {
-				this.logger.warn(
-					`Chunk ${fileName} has no code content, skipping`
-				);
+				this.logger.warn(`Chunk ${fileName} has no code content, skipping`);
 				return null;
 			}
 			source = chunk.code;
 		}
 		// Unknown bundle item type
 		else {
-			this.logger.warn(
-				`Unknown bundle item type for ${fileName}, skipping`
-			);
+			this.logger.warn(`Unknown bundle item type for ${fileName}, skipping`);
 			return null;
 		}
 
@@ -833,28 +926,28 @@ export class DynamicImportAnalyzer {
 	private readonly logger: BundleLogger;
 
 	/**
-	 * Constructs a new DynamicImportAnalyzer with the provided logger.
-	 *
-	 * @param logger - Logger instance for consistent reporting
-	 */
+   * Constructs a new DynamicImportAnalyzer with the provided logger.
+   *
+   * @param logger - Logger instance for consistent reporting
+   */
 	constructor(logger: BundleLogger) {
 		this.logger = logger;
 	}
 
 	/**
-	 * Analyzes bundle to discover dynamic import relationships and return chunk file names.
-	 * Creates multiple mapping strategies to ensure dynamic imports are properly resolved.
-	 *
-	 * Analysis Flow:
-	 * 1. Build comprehensive module ID to file name mappings
-	 * 2. Extract all chunks from bundle
-	 * 3. Process dynamic imports from each chunk
-	 * 4. Resolve import identifiers to actual file names
-	 * 5. Collect and deduplicate results
-	 *
-	 * @param bundle - Output bundle to analyze
-	 * @returns Set<string> - Set of dynamic chunk file names
-	 */
+   * Analyzes bundle to discover dynamic import relationships and return chunk file names.
+   * Creates multiple mapping strategies to ensure dynamic imports are properly resolved.
+   *
+   * Analysis Flow:
+   * 1. Build comprehensive module ID to file name mappings
+   * 2. Extract all chunks from bundle
+   * 3. Process dynamic imports from each chunk
+   * 4. Resolve import identifiers to actual file names
+   * 5. Collect and deduplicate results
+   *
+   * @param bundle - Output bundle to analyze
+   * @returns Set<string> - Set of dynamic chunk file names
+   */
 	analyzeDynamicImports(bundle: OutputBundle): Set<string> {
 		const dynamicChunkFiles = new Set<string>();
 
@@ -907,17 +1000,17 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
-	 * Builds comprehensive mappings from module IDs to file names.
-	 * Creates multiple mapping strategies for robust dynamic import resolution.
-	 *
-	 * Mapping Strategies:
-	 * 1. Facade Module ID mapping (primary entry point)
-	 * 2. Chunk name mapping (fallback identifier)
-	 * 3. All module IDs within chunk (comprehensive coverage)
-	 *
-	 * @param bundle - Output bundle to analyze
-	 * @returns Map<string, string> - Module ID to file name mappings
-	 */
+   * Builds comprehensive mappings from module IDs to file names.
+   * Creates multiple mapping strategies for robust dynamic import resolution.
+   *
+   * Mapping Strategies:
+   * 1. Facade Module ID mapping (primary entry point)
+   * 2. Chunk name mapping (fallback identifier)
+   * 3. All module IDs within chunk (comprehensive coverage)
+   *
+   * @param bundle - Output bundle to analyze
+   * @returns Map<string, string> - Module ID to file name mappings
+   */
 	private buildModuleIdMappings(bundle: OutputBundle): Map<string, string> {
 		const idToFileMap = new Map<string, string>();
 		const chunks = this.extractChunksFromBundle(bundle);
@@ -948,12 +1041,12 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
-	 * Extracts and validates chunks from bundle, filtering out non-chunk entries.
-	 * Ensures type safety by filtering only chunk-type bundle items.
-	 *
-	 * @param bundle - Output bundle to process
-	 * @returns OutputChunk[] - Array of valid chunks
-	 */
+   * Extracts and validates chunks from bundle, filtering out non-chunk entries.
+   * Ensures type safety by filtering only chunk-type bundle items.
+   *
+   * @param bundle - Output bundle to process
+   * @returns OutputChunk[] - Array of valid chunks
+   */
 	private extractChunksFromBundle(bundle: OutputBundle): OutputChunk[] {
 		return Object.values(bundle).filter(
 			(item): item is OutputChunk => item.type === "chunk"
@@ -961,19 +1054,19 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
-	 * Resolves a dynamic import identifier to a concrete chunk file name.
-	 * Uses multiple resolution strategies with fallback mechanisms.
-	 *
-	 * Resolution Strategies (in order):
-	 * 1. Direct module ID/facade module ID lookup
-	 * 2. Direct bundle key lookup (when dynamic import is a bundle key)
-	 * 3. Chunk name matching (fallback when facade module ID is missing)
-	 *
-	 * @param dynamicImport - Dynamic import identifier
-	 * @param idToFileMap - Module ID to file name mappings
-	 * @param bundle - Output bundle for direct lookups
-	 * @returns string | null - Resolved file name or null if not found
-	 */
+   * Resolves a dynamic import identifier to a concrete chunk file name.
+   * Uses multiple resolution strategies with fallback mechanisms.
+   *
+   * Resolution Strategies (in order):
+   * 1. Direct module ID/facade module ID lookup
+   * 2. Direct bundle key lookup (when dynamic import is a bundle key)
+   * 3. Chunk name matching (fallback when facade module ID is missing)
+   *
+   * @param dynamicImport - Dynamic import identifier
+   * @param idToFileMap - Module ID to file name mappings
+   * @param bundle - Output bundle for direct lookups
+   * @returns string | null - Resolved file name or null if not found
+   */
 	private resolveDynamicImport(
 		dynamicImport: string,
 		idToFileMap: Map<string, string>,
@@ -1005,9 +1098,7 @@ export class DynamicImportAnalyzer {
 
 		// Strategy 3: Chunk name matching (fallback when facade module ID is missing)
 		const chunks = this.extractChunksFromBundle(bundle);
-		const matchingChunk = chunks.find(
-			(chunk) => chunk.name === dynamicImport
-		);
+		const matchingChunk = chunks.find((chunk) => chunk.name === dynamicImport);
 		if (matchingChunk) {
 			return matchingChunk.fileName;
 		}
@@ -1035,30 +1126,30 @@ export class HtmlProcessor {
 	private readonly config: HtmlProcessorConfig;
 
 	/**
-	 * Constructs a new HtmlProcessor with the provided configuration.
-	 *
-	 * @param config - Comprehensive configuration for HTML processing behavior
-	 */
+   * Constructs a new HtmlProcessor with the provided configuration.
+   *
+   * @param config - Comprehensive configuration for HTML processing behavior
+   */
 	constructor(config: HtmlProcessorConfig) {
 		this.config = config;
 	}
 
 	/**
-	 * Processes all HTML files in the bundle to inject SRI attributes and preload links.
-	 * Handles individual file failures gracefully while maintaining overall processing flow.
-	 *
-	 * Processing Flow:
-	 * 1. Extract and validate HTML files from bundle
-	 * 2. Process each HTML file with individual error boundaries
-	 * 3. Apply SRI attributes to existing elements
-	 * 4. Add preload links for dynamic chunks (if enabled)
-	 * 5. Update bundle with processed HTML content
-	 *
-	 * @param bundle - Output bundle containing HTML assets
-	 * @param sriByPathname - Mapping of pathnames to integrity hashes
-	 * @param dynamicChunkFiles - Set of dynamic chunk file names for preloading
-	 * @returns Promise<void> - Completes when all HTML files are processed
-	 */
+   * Processes all HTML files in the bundle to inject SRI attributes and preload links.
+   * Handles individual file failures gracefully while maintaining overall processing flow.
+   *
+   * Processing Flow:
+   * 1. Extract and validate HTML files from bundle
+   * 2. Process each HTML file with individual error boundaries
+   * 3. Apply SRI attributes to existing elements
+   * 4. Add preload links for dynamic chunks (if enabled)
+   * 5. Update bundle with processed HTML content
+   *
+   * @param bundle - Output bundle containing HTML assets
+   * @param sriByPathname - Mapping of pathnames to integrity hashes
+   * @param dynamicChunkFiles - Set of dynamic chunk file names for preloading
+   * @returns Promise<void> - Completes when all HTML files are processed
+   */
 	async processHtmlFiles(
 		bundle: OutputBundle,
 		sriByPathname: Record<string, string>,
@@ -1072,9 +1163,7 @@ export class HtmlProcessor {
 		const htmlFiles = this.extractHtmlFiles(bundle);
 
 		if (htmlFiles.length === 0) {
-			this.config.logger.warn(
-				"No HTML files found in bundle for processing"
-			);
+			this.config.logger.warn("No HTML files found in bundle for processing");
 			return;
 		}
 
@@ -1115,12 +1204,8 @@ export class HtmlProcessor {
 		// PROCESSING SUMMARY AND STATISTICS
 		// ========================================================================
 
-		const successCount = results.filter(
-			(r) => r.status === "fulfilled"
-		).length;
-		const failureCount = results.filter(
-			(r) => r.status === "rejected"
-		).length;
+		const successCount = results.filter((r) => r.status === "fulfilled").length;
+		const failureCount = results.filter((r) => r.status === "rejected").length;
 
 		this.config.logger.info(
 			`HTML processing completed: ${successCount} successful, ${failureCount} failed`
@@ -1128,23 +1213,21 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Extracts HTML assets from bundle with proper type validation.
-	 * Filters bundle entries to find only HTML assets with proper type checking.
-	 *
-	 * @param bundle - Output bundle to search
-	 * @returns Array<[string, OutputAsset]> - Array of HTML file name and asset pairs
-	 */
-	private extractHtmlFiles(
-		bundle: OutputBundle
-	): Array<[string, OutputAsset]> {
+   * Extracts HTML assets from bundle with proper type validation.
+   * Filters bundle entries to find only HTML assets with proper type checking.
+   *
+   * @param bundle - Output bundle to search
+   * @returns Array<[string, OutputAsset]> - Array of HTML file name and asset pairs
+   */
+	private extractHtmlFiles(bundle: OutputBundle): Array<[string, OutputAsset]> {
 		const htmlFiles: Array<[string, OutputAsset]> = [];
 
 		for (const [fileName, bundleItem] of Object.entries(bundle)) {
 			if (
 				typeof fileName === "string" &&
-				fileName.toLowerCase().endsWith(".html") &&
-				bundleItem &&
-				bundleItem.type === "asset"
+        fileName.toLowerCase().endsWith(".html") &&
+        bundleItem &&
+        bundleItem.type === "asset"
 			) {
 				htmlFiles.push([fileName, bundleItem as OutputAsset]);
 			}
@@ -1154,21 +1237,21 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Processes a single HTML file with comprehensive SRI injection and preload generation.
-	 *
-	 * Processing Steps:
-	 * 1. Extract and validate HTML content from asset
-	 * 2. Add SRI attributes to existing elements
-	 * 3. Add preload links for dynamic chunks (if enabled)
-	 * 4. Update asset source with processed HTML
-	 *
-	 * @param fileName - Name of the HTML file
-	 * @param asset - HTML asset from bundle
-	 * @param bundle - Complete bundle for resource resolution
-	 * @param sriByPathname - Integrity mappings
-	 * @param dynamicChunkFiles - Dynamic chunks for preloading
-	 * @returns Promise<void> - Completes when file is processed
-	 */
+   * Processes a single HTML file with comprehensive SRI injection and preload generation.
+   *
+   * Processing Steps:
+   * 1. Extract and validate HTML content from asset
+   * 2. Add SRI attributes to existing elements
+   * 3. Add preload links for dynamic chunks (if enabled)
+   * 4. Update asset source with processed HTML
+   *
+   * @param fileName - Name of the HTML file
+   * @param asset - HTML asset from bundle
+   * @param bundle - Complete bundle for resource resolution
+   * @param sriByPathname - Integrity mappings
+   * @param dynamicChunkFiles - Dynamic chunks for preloading
+   * @returns Promise<void> - Completes when file is processed
+   */
 	private async processSingleHtmlFile(
 		fileName: string,
 		asset: OutputAsset,
@@ -1215,36 +1298,30 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Extracts HTML content from asset with proper validation and type handling.
-	 * Handles both string and buffer sources with appropriate error reporting.
-	 *
-	 * @param asset - HTML asset to extract content from
-	 * @param fileName - File name for error reporting
-	 * @returns string | null - HTML content or null if invalid
-	 */
+   * Extracts HTML content from asset with proper validation and type handling.
+   * Handles both string and buffer sources with appropriate error reporting.
+   *
+   * @param asset - HTML asset to extract content from
+   * @param fileName - File name for error reporting
+   * @returns string | null - HTML content or null if invalid
+   */
 	private extractHtmlContent(
 		asset: OutputAsset,
 		fileName: string
 	): string | null {
 		// Check for source content existence
 		if (!asset.source) {
-			this.config.logger.warn(
-				`HTML file ${fileName} has no source content`
-			);
+			this.config.logger.warn(`HTML file ${fileName} has no source content`);
 			return null;
 		}
 
 		// Handle both string and buffer sources
 		const htmlContent =
-			typeof asset.source === "string"
-				? asset.source
-				: String(asset.source);
+      typeof asset.source === "string" ? asset.source : String(asset.source);
 
 		// Check for empty content
 		if (!htmlContent.trim()) {
-			this.config.logger.warn(
-				`HTML file ${fileName} appears to be empty`
-			);
+			this.config.logger.warn(`HTML file ${fileName} appears to be empty`);
 			return null;
 		}
 
@@ -1252,13 +1329,13 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Adds SRI attributes to existing HTML elements using the internal SRI processor.
-	 * Delegates to the established addSriToHtml function with proper configuration.
-	 *
-	 * @param htmlContent - Original HTML content
-	 * @param bundle - Bundle for resource resolution
-	 * @returns Promise<string> - HTML with SRI attributes added
-	 */
+   * Adds SRI attributes to existing HTML elements using the internal SRI processor.
+   * Delegates to the established addSriToHtml function with proper configuration.
+   *
+   * @param htmlContent - Original HTML content
+   * @param bundle - Bundle for resource resolution
+   * @returns Promise<string> - HTML with SRI attributes added
+   */
 	private async addSriToHtmlContent(
 		htmlContent: string,
 		bundle: OutputBundle
@@ -1276,20 +1353,20 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Adds modulepreload links for dynamic chunks with integrity attributes.
-	 * Uses Cheerio for safe DOM manipulation and duplicate prevention.
-	 *
-	 * Features:
-	 * - Safe DOM manipulation with Cheerio
-	 * - Duplicate link prevention
-	 * - Proper integrity and crossorigin attributes
-	 * - Error handling with fallback to original HTML
-	 *
-	 * @param htmlContent - HTML content to modify
-	 * @param dynamicChunkFiles - Set of dynamic chunk file names
-	 * @param sriByPathname - Integrity mappings
-	 * @returns Promise<string> - HTML with preload links added
-	 */
+   * Adds modulepreload links for dynamic chunks with integrity attributes.
+   * Uses parse5 for safe DOM manipulation and duplicate prevention.
+   *
+   * Features:
+   * - Safe DOM manipulation with parse5
+   * - Duplicate link prevention
+   * - Proper integrity and crossorigin attributes
+   * - Error handling with fallback to original HTML
+   *
+   * @param htmlContent - HTML content to modify
+   * @param dynamicChunkFiles - Set of dynamic chunk file names
+   * @param sriByPathname - Integrity mappings
+   * @returns Promise<string> - HTML with preload links added
+   */
 	private async addDynamicChunkPreloads(
 		htmlContent: string,
 		dynamicChunkFiles: Set<string>,
@@ -1300,10 +1377,24 @@ export class HtmlProcessor {
 			// DOM SETUP AND INITIALIZATION
 			// ====================================================================
 
-			// Import Cheerio for DOM manipulation
-			const { load } = await import("cheerio");
-			const $ = load(htmlContent);
+			// Parse HTML content with parse5
+			const document = parse(htmlContent, {
+				sourceCodeLocationInfo: false,
+			});
 			let addedCount = 0;
+
+			// Find the head element
+			const headElements = findElements(
+				document,
+				(el) => !!el.nodeName && el.nodeName.toLowerCase() === "head"
+			);
+			const head = headElements[0];
+			if (!head) {
+				this.config.logger.warn(
+					"No head element found, skipping dynamic chunk preloads"
+				);
+				return htmlContent;
+			}
 
 			// ====================================================================
 			// PRELOAD LINK GENERATION
@@ -1311,12 +1402,7 @@ export class HtmlProcessor {
 
 			// Process each dynamic chunk file
 			for (const chunkFile of dynamicChunkFiles) {
-				const added = this.addPreloadLinkForChunk(
-					$,
-					chunkFile,
-					sriByPathname
-				);
-				if (added) {
+				if (this.addPreloadLinkForChunk(head, chunkFile, sriByPathname)) {
 					addedCount++;
 				}
 			}
@@ -1328,7 +1414,7 @@ export class HtmlProcessor {
 			this.config.logger.info(
 				`Added ${addedCount} modulepreload links for dynamic chunks`
 			);
-			return $.html();
+			return serialize(document);
 		} catch (error) {
 			// ====================================================================
 			// ERROR HANDLING WITH FALLBACK
@@ -1347,22 +1433,22 @@ export class HtmlProcessor {
 	}
 
 	/**
-	 * Adds a single preload link for a dynamic chunk with proper duplicate checking.
-	 * Implements comprehensive validation and attribute generation.
-	 *
-	 * Validation Steps:
-	 * 1. Build absolute href using base path
-	 * 2. Check for existing preload links (duplicate prevention)
-	 * 3. Verify integrity availability
-	 * 4. Generate and inject preload link with proper attributes
-	 *
-	 * @param $ - Cheerio instance
-	 * @param chunkFile - Chunk file name
-	 * @param sriByPathname - Integrity mappings
-	 * @returns boolean - Whether a link was added
-	 */
+   * Adds a single preload link for a dynamic chunk with proper duplicate checking.
+   * Implements comprehensive validation and attribute generation.
+   *
+   * Validation Steps:
+   * 1. Build absolute href using base path
+   * 2. Check for existing preload links (duplicate prevention)
+   * 3. Verify integrity availability
+   * 4. Generate and inject preload link with proper attributes
+   *
+   * @param head - Head element from parse5 document
+   * @param chunkFile - Chunk file name
+   * @param sriByPathname - Integrity mappings
+   * @returns boolean - Whether a link was added
+   */
 	private addPreloadLinkForChunk(
-		$: any,
+		head: Element,
 		chunkFile: string,
 		sriByPathname: Record<string, string>
 	): boolean {
@@ -1374,8 +1460,13 @@ export class HtmlProcessor {
 		const href = path.posix.join(this.config.base, chunkFile);
 
 		// Check if preload link already exists (duplicate prevention)
-		const existingPreload = $(`link[rel="modulepreload"][href="${href}"]`);
-		if (existingPreload.length > 0) {
+		const existingPreloads = findElements(head, (el) => {
+			if (el.nodeName?.toLowerCase() !== "link") return false;
+			const rel = getAttrValue(el, "rel");
+			const elHref = getAttrValue(el, "href");
+			return rel === "modulepreload" && elHref === href;
+		});
+		if (existingPreloads.length > 0) {
 			return false; // Skip duplicate
 		}
 
@@ -1396,14 +1487,34 @@ export class HtmlProcessor {
 		// LINK GENERATION AND INJECTION
 		// ========================================================================
 
-		// Build crossorigin attribute if configured
-		const crossoriginAttr = this.config.crossorigin
-			? ` crossorigin="${this.config.crossorigin}"`
-			: "";
+		// Create a new link element
+		const linkElement: Element = {
+			nodeName: "link",
+			tagName: "link",
+			attrs: [
+				{ name: "rel", value: "modulepreload" },
+				{ name: "href", value: href },
+				{ name: "integrity", value: integrity },
+			],
+			namespaceURI: "http://www.w3.org/1999/xhtml" as any,
+			childNodes: [],
+			parentNode: head,
+			sourceCodeLocation: undefined,
+		};
 
-		// Create and prepend preload link to head
-		const linkHtml = `<link rel="modulepreload" href="${href}" integrity="${integrity}"${crossoriginAttr}>`;
-		$("head").prepend(linkHtml);
+		// Add crossorigin attribute if configured
+		if (this.config.crossorigin) {
+			linkElement.attrs.push({
+				name: "crossorigin",
+				value: this.config.crossorigin,
+			});
+		}
+
+		// Add the link element to the beginning of head
+		if (!head.childNodes) {
+			head.childNodes = [];
+		}
+		head.childNodes.unshift(linkElement);
 
 		return true;
 	}
@@ -1447,9 +1558,7 @@ export function installSriRuntime(
 		// ========================================================================
 
 		// Convert pathname mapping to Map for efficient lookup
-		const map = new Map<string, string>(
-			Object.entries(sriByPathname || {})
-		);
+		const map = new Map<string, string>(Object.entries(sriByPathname || {}));
 
 		// Extract CORS configuration with default fallback
 		const cors =
@@ -1462,12 +1571,12 @@ export function installSriRuntime(
 		// ========================================================================
 
 		/**
-		 * Extracts integrity value for a given URL using pathname matching.
-		 * Handles URL parsing errors gracefully and supports relative URLs.
-		 *
-		 * @param url - URL to look up integrity for
-		 * @returns SRI integrity string or undefined if not found
-		 */
+     * Extracts integrity value for a given URL using pathname matching.
+     * Handles URL parsing errors gracefully and supports relative URLs.
+     *
+     * @param url - URL to look up integrity for
+     * @returns SRI integrity string or undefined if not found
+     */
 		const getIntegrityForUrl = (
 			url: string | null | undefined
 		): string | undefined => {
@@ -1476,10 +1585,7 @@ export function installSriRuntime(
 			let value: string | undefined;
 			try {
 				// Parse URL with fallback to current location
-				const u = new URL(
-					url,
-					(globalThis as any).location?.href || ""
-				);
+				const u = new URL(url, (globalThis as any).location?.href || "");
 				value = map.get(u.pathname);
 			} catch {
 				// URL parsing failed - ignore and return undefined
@@ -1492,16 +1598,16 @@ export function installSriRuntime(
 		// ========================================================================
 
 		/**
-		 * Processes an element to potentially add SRI attributes.
-		 * Handles both script and link elements with comprehensive validation.
-		 *
-		 * Element Support:
-		 * - Script elements with src attributes
-		 * - Link elements with eligible rel/as combinations
-		 * - Proper integrity and crossorigin attribute handling
-		 *
-		 * @param el - DOM element to process
-		 */
+     * Processes an element to potentially add SRI attributes.
+     * Handles both script and link elements with comprehensive validation.
+     *
+     * Element Support:
+     * - Script elements with src attributes
+     * - Link elements with eligible rel/as combinations
+     * - Proper integrity and crossorigin attribute handling
+     *
+     * @param el - DOM element to process
+     */
 		const maybeSetIntegrity = (el: any) => {
 			if (!el) return;
 
@@ -1510,11 +1616,10 @@ export function installSriRuntime(
 			// ====================================================================
 
 			const isLink =
-				typeof HTMLLinkElement !== "undefined" &&
-				el instanceof HTMLLinkElement;
+        typeof HTMLLinkElement !== "undefined" && el instanceof HTMLLinkElement;
 			const isScript =
-				typeof HTMLScriptElement !== "undefined" &&
-				el instanceof HTMLScriptElement;
+        typeof HTMLScriptElement !== "undefined" &&
+        el instanceof HTMLScriptElement;
 
 			if (!isLink && !isScript) return;
 
@@ -1529,15 +1634,15 @@ export function installSriRuntime(
 				const rel = (el.rel || "").toLowerCase();
 				const as = (
 					(el.getAttribute && el.getAttribute("as")) ||
-					""
+          ""
 				).toLowerCase();
 
 				// Check if this link type is eligible for SRI
 				const eligible =
-					rel === "stylesheet" ||
-					rel === "modulepreload" ||
-					(rel === "preload" &&
-						(as === "script" || as === "style" || as === "font"));
+          rel === "stylesheet" ||
+          rel === "modulepreload" ||
+          (rel === "preload" &&
+            (as === "script" || as === "style" || as === "font"));
 
 				if (!eligible) return;
 				url = el.getAttribute && el.getAttribute("href");
@@ -1588,10 +1693,9 @@ export function installSriRuntime(
 					// Check if this attribute change should trigger SRI processing
 					if (
 						(this instanceof (globalThis as any).HTMLLinkElement &&
-							(n === "href" || n === "rel" || n === "as")) ||
-						(this instanceof
-							(globalThis as any).HTMLScriptElement &&
-							n === "src")
+              (n === "href" || n === "rel" || n === "as")) ||
+            (this instanceof (globalThis as any).HTMLScriptElement &&
+              n === "src")
 					) {
 						maybeSetIntegrity(this);
 					}
@@ -1608,12 +1712,12 @@ export function installSriRuntime(
 		// ========================================================================
 
 		/**
-		 * Wraps a DOM insertion method to process elements for SRI.
-		 * Handles both successful wrapping and fallback scenarios.
-		 *
-		 * @param proto - Prototype object to modify
-		 * @param key - Method name to wrap
-		 */
+     * Wraps a DOM insertion method to process elements for SRI.
+     * Handles both successful wrapping and fallback scenarios.
+     *
+     * @param proto - Prototype object to modify
+     * @param key - Method name to wrap
+     */
 		const wrapInsert = (proto: any, key: string) => {
 			const orig = proto && proto[key];
 			if (!orig || typeof orig !== "function") return;

@@ -1,4 +1,5 @@
-import { load as cheerioLoad } from "cheerio";
+import * as parse5 from "parse5";
+import type { Element } from "parse5/dist/tree-adapters/default";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sri from "../src/index";
 import {
@@ -80,14 +81,35 @@ describe("Internal Utility Functions", () => {
 		});
 	});
 
+	// Helper function to create a test element
+	function createTestElement(nodeName: string, attrs: { name: string; value: string }[]): Element {
+		return {
+			nodeName,
+			tagName: nodeName,
+			attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
+			namespaceURI: "http://www.w3.org/1999/xhtml",
+			childNodes: [],
+			parentNode: null,
+			sourceCodeLocation: undefined
+		};
+	}
+
+	// Helper function to get attribute value from element
+	function getAttrValue(element: Element, name: string): string | undefined {
+		const attr = element.attrs.find(a => a.name === name);
+		return attr?.value;
+	}
+
 	describe("getUrlAttrName", () => {
 		it("returns correct attribute names", () => {
-			expect(getUrlAttrName({ name: "script" })).toBe("src");
-			expect(getUrlAttrName({ name: "SCRIPT" })).toBe("src");
-			expect(getUrlAttrName({ name: "link" })).toBe("href");
-			expect(getUrlAttrName({ name: "div" })).toBe("href"); // fallback
-			expect(getUrlAttrName({})).toBe(null);
-			expect(getUrlAttrName(null)).toBe(null);
+			const scriptEl = createTestElement("script", []);
+			const linkEl = createTestElement("link", []);
+			const divEl = createTestElement("div", []);
+			
+			expect(getUrlAttrName(scriptEl)).toBe("src");
+			expect(getUrlAttrName(linkEl)).toBe("href");
+			expect(getUrlAttrName(divEl)).toBe("href"); // fallback
+			expect(getUrlAttrName(null as any)).toBe(null);
 		});
 	});
 
@@ -202,56 +224,56 @@ describe("Internal Utility Functions", () => {
 
 	describe("processElement", () => {
 		it("adds integrity to script elements", async () => {
-			const $ = cheerioLoad('<script src="/foo.js"></script>');
-			const $script = $("script").first();
+			const element = createTestElement("script", [{ name: "src", value: "/foo.js" }]);
 			const bundle = mockBundle({ "foo.js": "console.log('test')" });
 
-			await processElement($script, bundle, "sha256");
+			await processElement(element, bundle, "sha256");
 
-			expect($script.attr("integrity")).toMatch(/^sha256-/);
+			expect(getAttrValue(element, "integrity")).toMatch(/^sha256-/);
 		});
 
 		it("adds integrity to link elements", async () => {
-			const $ = cheerioLoad('<link rel="stylesheet" href="/style.css">');
-			const $link = $("link").first();
+			const element = createTestElement("link", [
+				{ name: "rel", value: "stylesheet" },
+				{ name: "href", value: "/style.css" }
+			]);
 			const bundle = mockBundle({ "style.css": "body{}" });
 
-			await processElement($link, bundle, "sha256", "anonymous");
+			await processElement(element, bundle, "sha256", "anonymous");
 
-			expect($link.attr("integrity")).toMatch(/^sha256-/);
-			expect($link.attr("crossorigin")).toBe("anonymous");
+			expect(getAttrValue(element, "integrity")).toMatch(/^sha256-/);
+			expect(getAttrValue(element, "crossorigin")).toBe("anonymous");
 		});
 
 		it("skips elements with existing integrity", async () => {
-			const $ = cheerioLoad(
-				'<script src="/foo.js" integrity="existing"></script>'
-			);
-			const $script = $("script").first();
+			const element = createTestElement("script", [
+				{ name: "src", value: "/foo.js" },
+				{ name: "integrity", value: "existing" }
+			]);
 			const bundle = mockBundle({ "foo.js": "console.log('test')" });
 
-			await processElement($script, bundle, "sha256");
+			await processElement(element, bundle, "sha256");
 
-			expect($script.attr("integrity")).toBe("existing");
+			expect(getAttrValue(element, "integrity")).toBe("existing");
 		});
 
 		it("handles missing resources gracefully", async () => {
-			const $ = cheerioLoad('<script src="/missing.js"></script>');
-			const $script = $("script").first();
+			const element = createTestElement("script", [{ name: "src", value: "/missing.js" }]);
 			const bundle = mockBundle({});
 
-			await processElement($script, bundle, "sha256");
+			await processElement(element, bundle, "sha256");
 
-			expect($script.attr("integrity")).toBeUndefined();
+			expect(getAttrValue(element, "integrity")).toBeUndefined();
 		});
 	});
 
 	describe("addSriToHtml", () => {
 		it("adds integrity to multiple element types", async () => {
-			const html = `
+			const html = `<!DOCTYPE html><html><head></head><body>
 				<script src="/script.js"></script>
 				<link rel="stylesheet" href="/style.css">
 				<link rel="modulepreload" href="/module.js">
-			`;
+			</body></html>`;
 			const bundle = mockBundle({
 				"script.js": "console.log('script')",
 				"style.css": "body{}",
@@ -269,7 +291,7 @@ describe("Internal Utility Functions", () => {
 		it("handles processing errors gracefully", async () => {
 			const mockLogger = createMockBundleLogger();
 
-			const html = '<script src="http://invalid-url"></script>';
+			const html = '<!DOCTYPE html><html><body><script src="http://invalid-url"></script></body></html>';
 			mockFetch.mockRejectedValue(new Error("Network error"));
 
 			const result = await addSriToHtml(html, {}, mockLogger, {
@@ -281,7 +303,7 @@ describe("Internal Utility Functions", () => {
 		});
 
 		it("adds crossorigin when specified", async () => {
-			const html = '<script src="/script.js"></script>';
+			const html = '<!DOCTYPE html><html><body><script src="/script.js"></script></body></html>';
 			const bundle = mockBundle({ "script.js": "console.log('script')" });
 
 			const result = await addSriToHtml(html, bundle, console, {
