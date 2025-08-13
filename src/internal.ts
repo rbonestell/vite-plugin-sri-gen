@@ -3,6 +3,8 @@ import path from "node:path";
 import type { DefaultTreeAdapterTypes, Token } from "parse5";
 import { parse, serialize } from "parse5";
 import type { OutputAsset, OutputBundle, OutputChunk } from "rollup";
+import type { IRuntimeDependencies } from './dom-abstraction';
+import { defaultDependencies } from './dom-abstraction';
 
 // Use public parse5 types instead of deep import
 type Document = DefaultTreeAdapterTypes.Document;
@@ -1765,6 +1767,98 @@ export function installSriRuntime(
 		// ========================================================================
 		// GLOBAL ERROR HANDLING
 		// ========================================================================
+		// Ignore all errors at the top level to prevent runtime failures
+		// The runtime SRI injection is an enhancement, not a requirement
+	}
+}
+
+/**
+ * Testable version of installSriRuntime with dependency injection.
+ * This version accepts dependencies to enable proper testing without global overrides.
+ *
+ * @param sriByPathname - Map of pathnames to their SRI integrity values
+ * @param opts - Configuration options for CORS settings
+ * @param dependencies - Injected dependencies for DOM/URL operations (defaults to production)
+ */
+export function installSriRuntimeWithDeps(
+	sriByPathname: Record<string, string>,
+	opts?: { crossorigin?: false | "anonymous" | "use-credentials" },
+	dependencies: IRuntimeDependencies = defaultDependencies
+) {
+	try {
+		const { domAdapter, nodeAdapter, urlAdapter } = dependencies;
+		
+		// Convert pathname mapping to Map for efficient lookup
+		const map = new Map<string, string>(Object.entries(sriByPathname || {}));
+
+		// Extract CORS configuration with default fallback
+		const cors =
+			opts && Object.prototype.hasOwnProperty.call(opts, "crossorigin")
+				? (opts as any).crossorigin
+				: "anonymous";
+
+		/**
+		 * Gets integrity value for a given URL using the URL adapter
+		 */
+		const getIntegrityForUrl = (url: string | null | undefined): string | undefined => {
+			if (!url) return undefined;
+
+			try {
+				const resolvedURL = urlAdapter.resolveURL(url);
+				const u = new URL(resolvedURL);
+				return map.get(u.pathname);
+			} catch {
+				// URL parsing failed - ignore and return undefined
+				return undefined;
+			}
+		};
+
+		/**
+		 * Processes an element to potentially add SRI attributes using the DOM adapter
+		 */
+		const maybeSetIntegrity = (el: any) => {
+			if (!el) return;
+
+			// Use DOM adapter for element type checking
+			const isLink = domAdapter.isHTMLLinkElement(el);
+			const isScript = domAdapter.isHTMLScriptElement(el);
+
+			if (!isLink && !isScript) return;
+
+			// Check if element is eligible for SRI using DOM adapter
+			if (!domAdapter.isEligibleForSRI(el)) return;
+
+			// Get URL using DOM adapter
+			const url = domAdapter.getElementURL(el);
+			if (!url) return;
+
+			// Look up integrity for this URL
+			const integrity = getIntegrityForUrl(url);
+			if (!integrity) return;
+
+			// Apply integrity using DOM adapter (handles errors internally)
+			domAdapter.setIntegrityAttributes(el, integrity, cors || undefined);
+		};
+
+		// Use node adapter to wrap setAttribute method
+		const elementProto = (Element as any)?.prototype;
+		if (elementProto) {
+			nodeAdapter.wrapSetAttribute(elementProto, maybeSetIntegrity);
+		}
+
+		// Use node adapter to wrap DOM insertion methods
+		const nodeProto = (Node as any)?.prototype;
+		
+		if (nodeProto) {
+			nodeAdapter.wrapNodeInsertion(nodeProto, "appendChild", maybeSetIntegrity);
+			nodeAdapter.wrapNodeInsertion(nodeProto, "insertBefore", maybeSetIntegrity);
+		}
+		
+		if (elementProto) {
+			nodeAdapter.wrapNodeInsertion(elementProto, "append", maybeSetIntegrity);
+			nodeAdapter.wrapNodeInsertion(elementProto, "prepend", maybeSetIntegrity);
+		}
+	} catch {
 		// Ignore all errors at the top level to prevent runtime failures
 		// The runtime SRI injection is an enhancement, not a requirement
 	}

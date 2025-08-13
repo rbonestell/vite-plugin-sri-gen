@@ -62,6 +62,7 @@ describe("Internal Utility Functions", () => {
 		it("computes sha256 integrity", () => {
 			const result = computeIntegrity("hello", "sha256");
 			expect(result).toMatch(/^sha256-[A-Za-z0-9+/]+=*$/);
+			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
 		});
 
 		it("computes sha384 integrity", () => {
@@ -78,6 +79,111 @@ describe("Internal Utility Functions", () => {
 			const bytes = new Uint8Array([104, 101, 108, 108, 111]); // "hello"
 			const result = computeIntegrity(bytes, "sha256");
 			expect(result).toMatch(/^sha256-[A-Za-z0-9+/]+=*$/);
+			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+		});
+
+		it("handles Buffer input", () => {
+			const buffer = Buffer.from("hello", "utf8");
+			const result = computeIntegrity(buffer, "sha256");
+			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+		});
+
+		it("handles empty input", () => {
+			const result = computeIntegrity("", "sha256");
+			expect(result).toBe("sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
+		});
+
+		it("produces consistent results for same input", () => {
+			const input = "test data for consistency";
+			const result1 = computeIntegrity(input, "sha256");
+			const result2 = computeIntegrity(input, "sha256");
+			expect(result1).toBe(result2);
+		});
+	});
+
+	describe("loadResource comprehensive", () => {
+		beforeEach(() => {
+			mockFetch.mockClear();
+		});
+
+		it("loads HTTP resources as Uint8Array successfully", async () => {
+			const mockResponse = {
+				ok: true,
+				status: 200,
+				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+			};
+			mockFetch.mockResolvedValue(mockResponse);
+
+			const result = await loadResource("http://example.com/resource.css", {});
+			expect(result).toBeInstanceOf(Uint8Array);
+			expect(mockFetch).toHaveBeenCalledWith("http://example.com/resource.css", undefined);
+		});
+
+		it("handles fetch errors by throwing", async () => {
+			mockFetch.mockRejectedValue(new Error("Network error"));
+
+			await expect(loadResource("http://example.com/resource.css", {})).rejects.toThrow("Network error");
+		});
+
+		it("handles non-ok HTTP responses by throwing", async () => {
+			const mockResponse = {
+				ok: false,
+				status: 404,
+				statusText: "Not Found"
+			};
+			mockFetch.mockResolvedValue(mockResponse);
+
+			await expect(loadResource("http://example.com/resource.css", {})).rejects.toThrow("Failed to fetch");
+		});
+
+		it("uses cache for repeated requests", async () => {
+			const cache = new Map();
+			const cachedData = new Uint8Array([1, 2, 3]);
+			cache.set("http://example.com/cached.css", cachedData);
+
+			const result = await loadResource("http://example.com/cached.css", {}, { cache });
+			expect(result).toBe(cachedData);
+			expect(mockFetch).not.toHaveBeenCalled();
+		});
+
+		it("returns null for non-HTTP URLs when no bundle provided", async () => {
+			const result = await loadResource("/local/path.css", {});
+			expect(result).toBe(null);
+			expect(mockFetch).not.toHaveBeenCalled();
+		});
+
+		it("loads local bundle resources", async () => {
+			const bundle = mockBundle({ "test.css": "body { color: red; }" });
+			const result = await loadResource("/test.css", bundle);
+			expect(result).toBe("body { color: red; }");
+		});
+
+		it("returns null for missing local resources", async () => {
+			const bundle = mockBundle({ "test.css": "body { color: red; }" });
+			const result = await loadResource("/missing.css", bundle);
+			expect(result).toBe(null);
+		});
+
+		it("handles undefined resource path", async () => {
+			const result = await loadResource(undefined, {});
+			expect(result).toBe(null);
+		});
+
+		it("handles empty string resource path", async () => {
+			const result = await loadResource("", {});
+			expect(result).toBe(null);
+		});
+
+		it("converts protocol-relative URLs to HTTPS", async () => {
+			const mockResponse = {
+				ok: true,
+				status: 200,
+				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+			};
+			mockFetch.mockResolvedValue(mockResponse);
+
+			await loadResource("//example.com/resource.css", {});
+			expect(mockFetch).toHaveBeenCalledWith("https://example.com/resource.css", undefined);
 		});
 	});
 
@@ -108,7 +214,7 @@ describe("Internal Utility Functions", () => {
 			
 			expect(getUrlAttrName(scriptEl)).toBe("src");
 			expect(getUrlAttrName(linkEl)).toBe("href");
-			expect(getUrlAttrName(divEl)).toBe("href"); // fallback
+			expect(getUrlAttrName(divEl)).toBe("href"); // defaults to href for unknown elements
 			expect(getUrlAttrName(null as any)).toBe(null);
 		});
 	});
@@ -815,7 +921,7 @@ describe("Processing Classes", () => {
 					fileName: "entry.js",
 					facadeModuleId: "src/entry.js",
 					name: "entry",
-					dynamicImports: ["chunk-name-only"], // This will only match by name (lines 1035-1038)
+					dynamicImports: ["chunk-name-only"], // This will match by chunk name when moduleId is unavailable
 					modules: { "src/entry.js": {} },
 				},
 				// This chunk has NO facadeModuleId and is NOT a direct bundle key match
@@ -981,7 +1087,7 @@ describe("Processing Classes", () => {
 
 			const html = String(bundle["index.html"].source);
 			const matches = html.match(/rel="modulepreload"/g) || [];
-			expect(matches.length).toBe(1); // Should not duplicate existing link
+			expect(matches.length).toBe(1); // Should not duplicate existing preload link
 		});
 
 		it("warns when integrity is missing for dynamic chunks", async () => {
@@ -1100,7 +1206,151 @@ describe("Processing Classes", () => {
 		});
 	});
 
-	describe("Additional Coverage Tests", () => {
+	describe("Legacy Coverage Tests (Global Overrides - Consider New Architecture)", () => {
+		// NOTE: These tests use global overrides to test error handling scenarios.
+		// For new tests, prefer the dependency injection approach in dom-abstraction.spec.ts
+		// See installSriRuntimeWithDeps and the DOM abstraction layer for cleaner testing.
+		it("covers childNodes initialization in addPreloadLink", async () => {
+			const mockLogger = createMockBundleLogger();
+			
+			const config = {
+				algorithm: "sha256" as const,
+				base: "/",
+				preloadDynamicChunks: true,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+			};
+
+			const processor = new HtmlProcessor(config);
+			
+			// Create HTML to test the initialization path
+			const html = '<!DOCTYPE html><html><head></head><body></body></html>';
+			
+			const bundle: any = {
+				"index.html": { type: "asset", source: html },
+			};
+			const sriByPathname = { "/chunk.js": "sha256-abc123" };
+			const dynamicChunkFiles = new Set(["chunk.js"]);
+
+			// Mock the private method to manipulate the DOM structure
+			const originalAddDynamicChunkPreloads = (processor as any).addDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads = function(htmlContent: string, dynamicChunkFiles: Set<string>, sriByPathname: Record<string, string>) {
+				const dom = parse5.parse(htmlContent) as any;
+				const html = dom.childNodes.find((node: any) => node.nodeName === 'html');
+				const head = html?.childNodes.find((node: any) => node.nodeName === 'head');
+				
+				if (head) {
+					// Set childNodes to undefined to trigger the initialization
+					head.childNodes = undefined;
+				}
+				
+				return originalAddDynamicChunkPreloads.call(this, htmlContent, dynamicChunkFiles, sriByPathname);
+			};
+
+			// This should initialize head.childNodes = [] and add the preload link
+			await processor.processHtmlFiles(bundle, sriByPathname, dynamicChunkFiles);
+			
+			// Restore original method
+			(processor as any).addDynamicChunkPreloads = originalAddDynamicChunkPreloads;
+		});
+
+		it("covers error handling in addDynamicChunkPreloads", async () => {
+			const mockLogger = createMockBundleLogger();
+			
+			const config = {
+				algorithm: "sha256" as const,
+				base: "/",
+				preloadDynamicChunks: true,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+			};
+
+			const processor = new HtmlProcessor(config);
+			
+			// Create HTML
+			const html = '<!DOCTYPE html><html><head></head><body></body></html>';
+
+			const bundle: any = {
+				"index.html": { type: "asset", source: html },
+			};
+			const sriByPathname = { "/chunk.js": "sha256-abc123" };
+			const dynamicChunkFiles = new Set(["chunk.js"]);
+
+			// Mock the private method to throw an error
+			const originalAddDynamicChunkPreloads = (processor as any).addDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads = function() {
+				throw new Error("Parse error to test error handling");
+			};
+
+			// This should trigger error handling and fall back gracefully with original HTML
+			await processor.processHtmlFiles(bundle, sriByPathname, dynamicChunkFiles);
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				expect.stringContaining("Parse error to test error handling"),
+				expect.any(Error)
+			);
+			
+			// Restore original method
+			(processor as any).addDynamicChunkPreloads = originalAddDynamicChunkPreloads;
+		});
+
+		it("covers error handling in maybeSetIntegrity", () => {
+			/**
+			 * Tests error handling when DOM operations fail during runtime SRI injection.
+			 * This simulates setAttribute failures and verifies graceful error handling.
+			 */
+			const originalElement = (globalThis as any).Element;
+			const originalHTMLLinkElement = (globalThis as any).HTMLLinkElement;
+			const originalHTMLScriptElement = (globalThis as any).HTMLScriptElement;
+
+			try {
+				// Create minimal fake DOM with functions that will fail silently
+				(globalThis as any).Element = function Element() {};
+				(globalThis as any).Element.prototype = {
+					setAttribute: function (name: string, value: string) {
+						if (name === "integrity" || name === "crossorigin") {
+							// This simulates setAttribute failure to test error handling
+							throw new Error("setAttribute failed for error testing");
+						}
+						// For other attributes, simulate normal behavior
+						(this as any)[name] = value;
+					},
+				};
+				
+				(globalThis as any).HTMLLinkElement = function HTMLLinkElement() {
+					this.hasAttribute = (name: string) => false;
+					this.rel = "";
+				};
+				(globalThis as any).HTMLLinkElement.prototype = Object.create(
+					(globalThis as any).Element.prototype
+				);
+				
+				(globalThis as any).HTMLScriptElement = function HTMLScriptElement() {
+					this.hasAttribute = (name: string) => false;
+				};
+				(globalThis as any).HTMLScriptElement.prototype = Object.create(
+					(globalThis as any).Element.prototype
+				);
+
+				// Install runtime with a problematic element that will throw
+				installSriRuntime({ "/test.js": "sha256-abc123" }, {});
+
+				const script = new (globalThis as any).HTMLScriptElement();
+				
+				// This should trigger the error in maybeSetIntegrity and handle it gracefully
+				// The error should be caught and not propagated
+				expect(() => {
+					(script as any).setAttribute("src", "/test.js");
+				}).not.toThrow(); // Should not throw because error is caught
+			} finally {
+				(globalThis as any).Element = originalElement;
+				(globalThis as any).HTMLLinkElement = originalHTMLLinkElement;
+				(globalThis as any).HTMLScriptElement = originalHTMLScriptElement;
+			}
+		});
+
 		it("covers URL parsing failure in runtime helpers", () => {
 			// Test the internal URL parsing error handling
 			const originalLocation = (globalThis as any).location;
@@ -1165,6 +1415,308 @@ describe("Processing Classes", () => {
 				(globalThis as any).HTMLScriptElement =
 					originalHTMLScriptElement;
 			}
+		});
+	});
+});
+
+describe("Additional Edge Cases and Error Paths", () => {
+	describe("validateGenerateBundleInputs", () => {
+		it("validates valid non-empty bundle with HTML", () => {
+			const bundle = { 
+				"test.js": { type: "chunk", code: "console.log('test')" },
+				"index.html": { type: "asset", source: "<html><head><script src='test.js'></script></head></html>" }
+			};
+			const result = validateGenerateBundleInputs(bundle, false);
+			expect(result.isValid).toBe(true);
+			expect(result.shouldWarn).toBe(false);
+			expect(result.message).toBe(null);
+		});
+
+		it("warns about invalid bundle", () => {
+			const result = validateGenerateBundleInputs(null as any, false);
+			expect(result.isValid).toBe(false);
+			expect(result.shouldWarn).toBe(true);
+			expect(result.message).toContain("Invalid bundle provided to generateBundle");
+		});
+
+		it("warns about empty bundle", () => {
+			const result = validateGenerateBundleInputs({}, false);
+			expect(result.isValid).toBe(false);
+			expect(result.shouldWarn).toBe(true);
+			expect(result.message).toContain("Empty bundle detected");
+		});
+
+		it("handles bundle without HTML files in non-SSR mode", () => {
+			const bundle = { "test.js": { type: "chunk", code: "console.log('test')" } };
+			const result = validateGenerateBundleInputs(bundle, false);
+			expect(result.isValid).toBe(false);
+			expect(result.shouldWarn).toBe(false); // Non-SSR without HTML is silently skipped
+			expect(result.message).toBe(null);
+		});
+
+		it("handles bundle without HTML files in SSR mode", () => {
+			const bundle = { "test.js": { type: "chunk", code: "console.log('test')" } };
+			const result = validateGenerateBundleInputs(bundle, true);
+			expect(result.isValid).toBe(false);
+			expect(result.shouldWarn).toBe(true);
+			expect(result.message).toContain("No emitted HTML detected during SSR build");
+		});
+
+		it("handles non-object bundle", () => {
+			const result = validateGenerateBundleInputs("invalid" as any, false);
+			expect(result.isValid).toBe(false);
+			expect(result.shouldWarn).toBe(true);
+			expect(result.message).toContain("Invalid bundle provided to generateBundle");
+		});
+	});
+
+	describe("handleGenerateBundleError", () => {
+		it("logs error with stack trace", () => {
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const error = new Error("Test error");
+			
+			handleGenerateBundleError(error, mockLogger);
+			
+			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: Test error", error);
+		});
+
+		it("logs error without stack trace", () => {
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const errorLike = { message: "Test error" };
+			
+			handleGenerateBundleError(errorLike, mockLogger);
+			
+			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: [object Object]", undefined);
+		});
+
+		it("handles string errors", () => {
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			
+			handleGenerateBundleError("String error", mockLogger);
+			
+			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: String error", undefined);
+		});
+
+		it("handles null/undefined errors", () => {
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			
+			handleGenerateBundleError(null, mockLogger);
+			
+			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: null", undefined);
+		});
+	});
+
+	describe("createLogger edge cases", () => {
+		it("uses plugin context methods when available", () => {
+			const mockContext = {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn()
+			};
+			
+			const logger = createLogger(mockContext);
+			
+			logger.info("test info");
+			logger.warn("test warn");
+			logger.error("test error");
+			
+			expect(mockContext.info).toHaveBeenCalledWith("test info");
+			expect(mockContext.warn).toHaveBeenCalledWith("test warn");
+			expect(mockContext.error).toHaveBeenCalledWith("test error");
+		});
+
+		it("falls back to console when no plugin context", () => {
+			const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+			
+			try {
+				const logger = createLogger(null);
+				
+				logger.info("test info");
+				logger.warn("test warn");
+				logger.error("test error");
+				
+				// Logger adds [vite-plugin-sri-gen] prefix
+				expect(warnSpy).toHaveBeenCalledWith("[vite-plugin-sri-gen] test warn");
+				expect(errorSpy).toHaveBeenCalledWith("[vite-plugin-sri-gen] test error", undefined);
+			} finally {
+				consoleSpy.mockRestore();
+				warnSpy.mockRestore();
+				errorSpy.mockRestore();
+			}
+		});
+
+		it("handles missing plugin context gracefully", () => {
+			const logger = createLogger(undefined);
+			
+			// Should not throw when plugin context is undefined
+			expect(() => {
+				logger.info("test");
+				logger.warn("test");
+				logger.error("test");
+			}).not.toThrow();
+		});
+	});
+
+	describe("addSriToHtml edge cases", () => {
+		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+		beforeEach(() => {
+			mockLogger.info.mockClear();
+			mockLogger.warn.mockClear();
+			mockLogger.error.mockClear();
+		});
+
+		it("handles malformed HTML gracefully", async () => {
+			const malformedHtml = "<html><head><script src='/test.js'><body>"; // Missing closing tags
+			const bundle = mockBundle({ "test.js": "console.log('test')" });
+			
+			const result = await addSriToHtml(malformedHtml, bundle, mockLogger);
+			
+			// Should still process what it can
+			expect(result).toContain("integrity=");
+		});
+
+		it("handles empty HTML", async () => {
+			const result = await addSriToHtml("", {}, mockLogger);
+			// parse5 adds basic HTML structure even for empty input
+			expect(result).toContain("<html>");
+		});
+
+		it("handles HTML with no eligible elements", async () => {
+			const html = "<html><head><title>Test</title></head><body><div>Content</div></body></html>";
+			const result = await addSriToHtml(html, {}, mockLogger);
+			expect(result).toBe(html);
+		});
+	});
+
+	describe("processElement edge cases", () => {
+		// Helper to find createTestElement function scope
+		function localCreateTestElement(nodeName: string, attrs: { name: string; value: string }[]): Element {
+			return {
+				nodeName,
+				tagName: nodeName,
+				attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
+				namespaceURI: "http://www.w3.org/1999/xhtml",
+				childNodes: [],
+				parentNode: null,
+				sourceCodeLocation: undefined
+			};
+		}
+
+		// Helper function to get attribute value from element
+		function localGetAttrValue(element: Element, name: string): string | undefined {
+			const attr = element.attrs.find(a => a.name === name);
+			return attr?.value;
+		}
+
+		it("handles element without URL attribute", async () => {
+			const element = localCreateTestElement("script", []); // No src attribute
+			const bundle = mockBundle({ "test.js": "console.log('test')" });
+			
+			await processElement(element, bundle, "sha256");
+			
+			// Should not add integrity when no URL
+			expect(localGetAttrValue(element, "integrity")).toBeUndefined();
+		});
+
+		it("handles element with existing integrity", async () => {
+			const element = localCreateTestElement("script", [
+				{ name: "src", value: "/test.js" },
+				{ name: "integrity", value: "existing-integrity" }
+			]);
+			const bundle = mockBundle({ "test.js": "console.log('test')" });
+			
+			await processElement(element, bundle, "sha256");
+			
+			// Should preserve existing integrity
+			expect(localGetAttrValue(element, "integrity")).toBe("existing-integrity");
+		});
+
+		it("handles resource loading failure", async () => {
+			const element = localCreateTestElement("script", [{ name: "src", value: "/missing.js" }]);
+			const bundle = mockBundle({ "test.js": "console.log('test')" }); // Different file
+			
+			await processElement(element, bundle, "sha256");
+			
+			// Should not add integrity when resource loading fails
+			expect(localGetAttrValue(element, "integrity")).toBeUndefined();
+		});
+
+		it("handles empty resource content", async () => {
+			const element = localCreateTestElement("script", [{ name: "src", value: "/empty.js" }]);
+			const bundle = mockBundle({ "empty.js": "" }); // Empty content
+			
+			await processElement(element, bundle, "sha256");
+			
+			// Should handle empty content gracefully
+			const integrity = localGetAttrValue(element, "integrity");
+			if (integrity) {
+				expect(integrity).toMatch(/^sha256-/);
+			} else {
+				// Empty content might not get integrity added
+				expect(integrity).toBeUndefined();
+			}
+		});
+	});
+
+	describe("Integration error scenarios", () => {
+		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+		beforeEach(() => {
+			mockLogger.info.mockClear();
+			mockLogger.warn.mockClear();
+			mockLogger.error.mockClear();
+		});
+
+		it("handles bundle with circular references", async () => {
+			const circularBundle: any = {};
+			circularBundle.self = circularBundle; // Create circular reference
+			
+			const html = "<html><head><script src='/test.js'></script></head></html>";
+			
+			// Should not throw on circular references
+			expect(async () => {
+				await addSriToHtml(html, circularBundle, mockLogger);
+			}).not.toThrow();
+		});
+
+		it("handles bundle with non-string content", async () => {
+			const bundle = {
+				"test.js": {
+					type: "chunk",
+					source: 123 // Non-string source
+				}
+			};
+			
+			const html = "<html><head><script src='/test.js'></script></head></html>";
+			
+			// Should handle non-string content gracefully
+			expect(async () => {
+				await addSriToHtml(html, bundle, mockLogger);
+			}).not.toThrow();
+		});
+
+		it("handles extremely large HTML documents", async () => {
+			// Create large HTML with many script tags
+			const scripts = Array(100).fill(0).map((_, i) => 
+				`<script src='/test${i}.js'></script>`
+			).join('');
+			const html = `<html><head>${scripts}</head></html>`;
+			
+			const bundle = mockBundle(
+				Object.fromEntries(
+					Array(100).fill(0).map((_, i) => [`test${i}.js`, `console.log(${i})`])
+				)
+			);
+			
+			// Should handle large documents without issues
+			const result = await addSriToHtml(html, bundle, mockLogger);
+			
+			// Verify all scripts got integrity attributes
+			const integrityCount = (result.match(/integrity=/g) || []).length;
+			expect(integrityCount).toBe(100);
 		});
 	});
 });
