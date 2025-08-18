@@ -90,6 +90,8 @@ export class MockLinkElement extends MockElement implements IBrowserHTMLLinkElem
 	set as(value: string | undefined) {
 		if (value !== undefined) {
 			this.setAttribute('as', value);
+		} else {
+			this.removeAttribute('as');
 		}
 	}
 }
