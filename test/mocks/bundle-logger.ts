@@ -1,5 +1,6 @@
 import { vi, type MockedFunction } from "vitest";
 import type { BundleLogger } from "../../src/internal";
+import { createConsoleMock } from "./logger-mock";
 
 type BundleEntry = { code?: any; source?: any };
 type Bundle = Record<string, BundleEntry>;
@@ -54,26 +55,20 @@ export function mockBundle(files: Record<string, string | BundleEntry>): Bundle 
 
 /**
  * Creates a spy on console methods and returns cleanup function
+ * @deprecated Use the new logger-mock.ts utilities instead for better test isolation
  */
 export function spyOnConsole() {
-	const originalConsole = {
-		warn: console.warn,
-		error: console.error,
-		info: console.info,
-	};
-
-	const spies = {
-		warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
-		error: vi.spyOn(console, "error").mockImplementation(() => {}),
-		info: vi.spyOn(console, "info").mockImplementation(() => {}),
-	};
-
+	// Use the new console mock system for consistent behavior
+	const consoleMock = createConsoleMock();
+	
 	return {
-		spies,
+		spies: {
+			warn: consoleMock.mocks.warn,
+			error: consoleMock.mocks.error,
+			info: consoleMock.mocks.info,
+		},
 		cleanup: () => {
-			spies.warn.mockRestore();
-			spies.error.mockRestore();
-			spies.info.mockRestore();
+			consoleMock.restore();
 		},
 	};
 }
