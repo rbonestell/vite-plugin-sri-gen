@@ -19,7 +19,11 @@ import {
 	validateGenerateBundleInputs,
 } from "../src/internal";
 import { createMockBundleLogger, createMockPluginContext, mockBundle, spyOnConsole } from "./mocks/bundle-logger";
+import { autoSetupConsoleMock } from "./mocks/logger-mock";
 
+
+// Auto-setup console mocking for all tests
+autoSetupConsoleMock();
 
 // Mock global fetch for HTTP resource tests
 const mockFetch = vi.fn();

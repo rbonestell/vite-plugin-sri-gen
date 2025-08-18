@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sri from "../src/index";
 import { installSriRuntime, installSriRuntimeWithDeps } from "../src/internal";
-import { createMockBundleLogger, createMockPluginContext, mockBundle, spyOnConsole } from "./mocks/bundle-logger";
-import { createTestDependencies, createMockElements } from "./mocks/dom-abstraction-mocks";
-
+import {
+	createMockPluginContext,
+	mockBundle,
+	spyOnConsole,
+} from "./mocks/bundle-logger";
+import {
+	createMockElements,
+	createTestDependencies,
+} from "./mocks/dom-abstraction-mocks";
+import { autoSetupConsoleMock } from "./mocks/logger-mock";
 
 // Types for dynamic import tests
 type Chunk = {
@@ -133,6 +140,9 @@ function setupFakeDom(withInsertFns = false) {
 		}
 	};
 }
+
+// Auto-setup console mocking for all tests
+autoSetupConsoleMock();
 
 describe("vite-plugin-sri-gen", () => {
 	describe("Basic Plugin Functionality", () => {
@@ -326,12 +336,12 @@ describe("vite-plugin-sri-gen", () => {
 		it("falls back to sha384 and warns when algorithm is unsupported", async () => {
 			const plugin = sri({ algorithm: "md5" } as any) as any;
 			const mockContext = createMockPluginContext();
-			
+
 			// First create the logger by calling generateBundle once
 			await plugin.generateBundle.call(mockContext, {}, {
-				"test.js": { type: "chunk", code: "console.log('test')" }
+				"test.js": { type: "chunk", code: "console.log('test')" },
 			} as any);
-			
+
 			// Now simulate Vite config resolution context which will use the logger
 			plugin.configResolved?.call(mockContext, {
 				command: "build",
@@ -343,9 +353,13 @@ describe("vite-plugin-sri-gen", () => {
 			const html = `<!doctype html><html><head>
         <script src="/a.js"></script>
       </head></html>`;
-			const out = await plugin.transformIndexHtml.call(mockContext, html, {
-				bundle: mockBundle({ "a.js": "console.log(1)" }),
-			} as any);
+			const out = await plugin.transformIndexHtml.call(
+				mockContext,
+				html,
+				{
+					bundle: mockBundle({ "a.js": "console.log(1)" }),
+				} as any
+			);
 			expect(out).toContain('integrity="sha384-'); // fallback
 		});
 
@@ -960,16 +974,19 @@ describe("vite-plugin-sri-gen", () => {
 		it("covers the catch block and error rethrow in generateBundle", async () => {
 			const plugin = sri() as any;
 			const mockContext = createMockPluginContext();
-			
+
 			// Mock the buildIntegrityMappings method to throw an error
 			const { IntegrityProcessor } = await import("../src/internal");
-			const buildMappingsSpy = vi.spyOn(IntegrityProcessor.prototype, 'buildIntegrityMappings')
-				.mockRejectedValue(new Error("Simulated integrity mapping error"));
+			const buildMappingsSpy = vi
+				.spyOn(IntegrityProcessor.prototype, "buildIntegrityMappings")
+				.mockRejectedValue(
+					new Error("Simulated integrity mapping error")
+				);
 
 			const bundle: any = {
 				"index.html": {
-					type: "asset", 
-					source: "<!DOCTYPE html><html></html>"
+					type: "asset",
+					source: "<!DOCTYPE html><html></html>",
 				},
 				"test.js": {
 					type: "chunk",
@@ -978,10 +995,10 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Should throw the error after handling it
-			await expect(plugin.generateBundle.call(mockContext, {}, bundle)).rejects.toThrow(
-				"Simulated integrity mapping error"
-			);
-			
+			await expect(
+				plugin.generateBundle.call(mockContext, {}, bundle)
+			).rejects.toThrow("Simulated integrity mapping error");
+
 			// Restore the spy
 			buildMappingsSpy.mockRestore();
 		});
@@ -1230,18 +1247,18 @@ describe("vite-plugin-sri-gen", () => {
 	describe("Runtime with Dependency Injection (New Architecture)", () => {
 		/**
 		 * This section demonstrates the recommended testing approach using dependency injection.
-		 * 
+		 *
 		 * Benefits over global overrides:
 		 * - No global state pollution
-		 * - Isolated, predictable tests  
+		 * - Isolated, predictable tests
 		 * - Easy to mock specific behaviors
 		 * - Better maintainability
-		 * 
+		 *
 		 * Use this pattern for all new runtime tests.
 		 */
 		let testDeps: ReturnType<typeof createTestDependencies>;
 		let mockElements: ReturnType<typeof createMockElements>;
-		
+
 		beforeEach(() => {
 			// Create fresh mock dependencies for each test
 			testDeps = createTestDependencies();
@@ -1254,41 +1271,54 @@ describe("vite-plugin-sri-gen", () => {
 			 * dependency injection instead of global prototype manipulation.
 			 */
 			const sriMap = { "/test.js": "sha256-abc123" };
-			
+
 			// Install runtime using injected mock dependencies
-			installSriRuntimeWithDeps(sriMap, { crossorigin: "anonymous" }, testDeps);
-			
+			installSriRuntimeWithDeps(
+				sriMap,
+				{ crossorigin: "anonymous" },
+				testDeps
+			);
+
 			// Create test element and simulate the runtime processing workflow
 			const script = mockElements.createScript({ src: "/test.js" });
-			
+
 			// Simulate the element processing logic that happens in the runtime
 			if (testDeps.domAdapter.isEligibleForSRI(script)) {
 				const url = testDeps.domAdapter.getElementURL(script);
 				const integrity = sriMap[url || ""];
 				if (integrity) {
-					testDeps.domAdapter.setIntegrityAttributes(script, integrity, "anonymous");
+					testDeps.domAdapter.setIntegrityAttributes(
+						script,
+						integrity,
+						"anonymous"
+					);
 				}
 			}
-			
+
 			// Verify SRI attributes were correctly applied
 			expect(script.getAttribute("integrity")).toBe("sha256-abc123");
 			expect(script.getAttribute("crossorigin")).toBe("anonymous");
 		});
 
 		it("handles different element types correctly", () => {
-			const sriMap = { 
-				"/test.js": "sha256-script", 
-				"/test.css": "sha256-style"
+			const sriMap = {
+				"/test.js": "sha256-script",
+				"/test.css": "sha256-style",
 			};
-			
+
 			const script = mockElements.createScript({ src: "/test.js" });
-			const link = mockElements.createLink({ href: "/test.css", rel: "stylesheet" });
+			const link = mockElements.createLink({
+				href: "/test.css",
+				rel: "stylesheet",
+			});
 			const ineligibleDiv = mockElements.createElement("div");
-			
+
 			expect(testDeps.domAdapter.isEligibleForSRI(script)).toBe(true);
 			expect(testDeps.domAdapter.isEligibleForSRI(link)).toBe(true);
-			expect(testDeps.domAdapter.isEligibleForSRI(ineligibleDiv)).toBe(false);
-			
+			expect(testDeps.domAdapter.isEligibleForSRI(ineligibleDiv)).toBe(
+				false
+			);
+
 			expect(testDeps.domAdapter.getElementURL(script)).toBe("/test.js");
 			expect(testDeps.domAdapter.getElementURL(link)).toBe("/test.css");
 		});
@@ -1296,15 +1326,19 @@ describe("vite-plugin-sri-gen", () => {
 		it("handles setAttribute errors gracefully in dependency injection", () => {
 			const sriMap = { "/test.js": "sha256-abc123" };
 			const script = mockElements.createScript({ src: "/test.js" });
-			
+
 			// Make the DOM adapter fail
 			testDeps.mocks.domAdapter.shouldFailSetIntegrity = true;
-			
+
 			// Should not throw
 			expect(() => {
-				testDeps.domAdapter.setIntegrityAttributes(script, "sha256-abc123", "anonymous");
+				testDeps.domAdapter.setIntegrityAttributes(
+					script,
+					"sha256-abc123",
+					"anonymous"
+				);
 			}).not.toThrow();
-			
+
 			// Attributes should not be set due to failure
 			expect(script.hasAttribute("integrity")).toBe(false);
 		});
@@ -1312,21 +1346,27 @@ describe("vite-plugin-sri-gen", () => {
 		it("tracks function calls for testing verification", () => {
 			const sriMap = { "/test.js": "sha256-abc123" };
 			const script = mockElements.createScript({ src: "/test.js" });
-			
+
 			// Process element through DOM adapter
-			testDeps.domAdapter.setIntegrityAttributes(script, "sha256-abc123", "anonymous");
-			
-			// Verify call was tracked with Vitest spy
-			expect(testDeps.mocks.domAdapter.setIntegrityAttributes).toHaveBeenCalledTimes(1);
-			expect(testDeps.mocks.domAdapter.setIntegrityAttributes).toHaveBeenCalledWith(
-				script, "sha256-abc123", "anonymous"
+			testDeps.domAdapter.setIntegrityAttributes(
+				script,
+				"sha256-abc123",
+				"anonymous"
 			);
+
+			// Verify call was tracked with Vitest spy
+			expect(
+				testDeps.mocks.domAdapter.setIntegrityAttributes
+			).toHaveBeenCalledTimes(1);
+			expect(
+				testDeps.mocks.domAdapter.setIntegrityAttributes
+			).toHaveBeenCalledWith(script, "sha256-abc123", "anonymous");
 		});
 	});
 
 	describe("Legacy Runtime Error Handling (Global Overrides)", () => {
 		// NOTE: These tests use global overrides which are less maintainable.
-		// For new tests, prefer the dependency injection approach shown in 
+		// For new tests, prefer the dependency injection approach shown in
 		// the "Runtime with Dependency Injection (New Architecture)" section above.
 		let cleanup: () => void;
 		beforeEach(() => {
