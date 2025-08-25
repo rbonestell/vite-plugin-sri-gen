@@ -24,6 +24,21 @@
 - Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
 - ESM-only, Node 18+ (uses global fetch)
 
+## Table of Contents
+
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Dev Mode](#dev-mode)
+- [Configuration](#configuration)
+- [Skipping Resources](#skipping-resources)
+- [Lazy-loaded Chunks and Dynamic Tags](#lazy-loaded-chunks-and-dynamic-tags)
+- [Runtime Patching](#runtime-patching)
+- [Compatibility](#compatibility)
+- [Examples](#examples)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+
 ## Install
 
 ```sh
@@ -35,19 +50,19 @@ npm i -D vite-plugin-sri-gen
 vite.config.ts / vite.config.js:
 
 ```ts
-import sri from 'vite-plugin-sri-gen'
+import sri from "vite-plugin-sri-gen";
 
 export default {
   plugins: [
     sri({
-      algorithm: 'sha384',       // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
-      crossorigin: 'anonymous',  // 'anonymous' | 'use-credentials' | undefined
-      fetchCache: true,          // cache remote fetches in-memory and dedupe concurrent requests (default: true)
-      fetchTimeoutMs: 5000,      // abort remote fetches after N ms; 0 disables timeout (default: 5000)
-      skipResources: [],         // skip SRI for resources matching these patterns (default: [])
-    })
-  ]
-}
+      algorithm: "sha384", // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
+      crossorigin: "anonymous", // 'anonymous' | 'use-credentials' | undefined
+      fetchCache: true, // cache remote fetches in-memory and dedupe concurrent requests (default: true)
+      fetchTimeoutMs: 5000, // abort remote fetches after N ms; 0 disables timeout (default: 5000)
+      skipResources: [], // skip SRI for resources matching these patterns (default: [])
+    }),
+  ],
+};
 ```
 
 During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
@@ -57,8 +72,6 @@ Advanced (optional): you can enable automatic rel="modulepreload" injection for 
 TypeScript/ESM notes:
 
 - The package ships ESM only with types. Import as `import sri from 'vite-plugin-sri-gen'`.
-- Built files live in `dist/` and type definitions at `dist/index.d.ts`.
-
 
 ## Dev mode
 
@@ -77,14 +90,14 @@ Conclusion: SRI is enforced only for build outputs, where assets are content-add
 
 ```ts
 type SriPluginOptions = {
-  algorithm?: 'sha256' | 'sha384' | 'sha512', // default: 'sha384'
-  crossorigin?: 'anonymous' | 'use-credentials', // default: undefined
-  fetchCache?: boolean, // default: true (in-memory cache + in-flight dedupe for remote assets)
-  fetchTimeoutMs?: number, // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
-  preloadDynamicChunks?: boolean, // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks
-  runtimePatchDynamicLinks?: boolean, // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
-  skipResources?: string[], // default: []. Skip SRI for resources matching these patterns (by id or src/href)
-}
+  algorithm?: "sha256" | "sha384" | "sha512"; // default: 'sha384'
+  crossorigin?: "anonymous" | "use-credentials"; // default: undefined
+  fetchCache?: boolean; // default: true (in-memory cache + in-flight dedupe for remote assets)
+  fetchTimeoutMs?: number; // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
+  preloadDynamicChunks?: boolean; // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks
+  runtimePatchDynamicLinks?: boolean; // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
+  skipResources?: string[]; // default: []. Skip SRI for resources matching these patterns (by id or src/href)
+};
 ```
 
 Notes:
@@ -104,32 +117,61 @@ You can exclude specific resources from SRI generation using the `skipResources`
 ```ts
 sri({
   skipResources: [
-    'analytics-script',              // Skip by element ID
-    'https://www.googletagmanager.com/*', // Skip by URL pattern
-    '*/gtm.js',                      // Skip Google Tag Manager
-    'vendor-*',                      // Skip vendor assets by pattern
-    '*.googleapis.com/*',            // Skip Google APIs
-  ]
-})
+    "analytics-script", // Skip by element ID
+    "https://www.googletagmanager.com/*", // Skip by URL pattern
+    "vendor-*", // Skip vendor assets by pattern
+    "*.googleapis.com/*", // Skip Google APIs
+  ],
+});
 ```
 
 **Pattern Types:**
+
 - **Element ID**: Matches the `id` attribute value exactly (`'analytics-script'`)
 - **URL Exact Match**: Matches `src` or `href` attribute exactly (`'https://example.com/script.js'`)
 - **URL Glob Pattern**: Use `*` as wildcard in URL patterns (`'*.googleapis.com/*'`, `'vendor-*'`)
 
 **Use Cases:**
+
 - Third-party analytics scripts that change frequently
 - A/B testing scripts with dynamic content
 - CDN resources that may be modified by the provider
 - Development/staging resources that shouldn't have integrity checks
 
-**Note**: Skipped elements will not have `integrity` attributes added, allowing them to be modified by CDNs or served with different content without breaking the page.
+> [!WARNING]  
+> Skipped elements will not have `integrity` attributes added, allowing them to be modified by CDNs or served with different content without breaking the page.
 
 ### Lazy-loaded chunks and dynamic tags
 
 - If `preloadDynamicChunks` is enabled (default), the plugin scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` for them into emitted HTML, honoring Vite `base` and `crossorigin`.
 - If `runtimePatchDynamicLinks` is enabled (default), a tiny runtime is prepended to entry chunks. It sets `integrity` (and `crossorigin` if configured) on dynamically created `<script>` and `<link>` elements for eligible resources (scripts, stylesheets, modulepreload, or preload as=script/style/font) before the network request happens. This is bundled code (not inline) and is CSP-safe.
+
+## Runtime Patching
+
+When `runtimePatchDynamicLinks` is enabled (default), the plugin injects a small runtime into entry chunks that patches DOM manipulation methods to automatically add integrity attributes to dynamically created elements.
+
+### How it works
+
+The runtime patches these DOM methods:
+
+- `Element.prototype.setAttribute` - Intercepts `src` and `href` attribute assignments
+- `Node.prototype.appendChild` - Intercepts element insertion
+- `Element.prototype.append/prepend/insertBefore` - Intercepts element insertion
+
+When code dynamically creates `<script>` or `<link>` elements and sets their `src`/`href` attributes, the runtime automatically adds the appropriate `integrity` and `crossorigin` attributes if a matching hash exists in the SRI map.
+
+### Eligible elements
+
+The runtime only processes elements that are eligible for SRI:
+
+- `<script>` elements with `src` attributes
+- `<link>` elements with `rel="stylesheet"`
+- `<link>` elements with `rel="modulepreload"`
+- `<link>` elements with `rel="preload"` and `as="script|style|font"`
+
+### Skip patterns
+
+The runtime respects `skipResources` patterns, allowing you to exclude specific resources from automatic SRI injection even when created dynamically.
 
 ## Compatibility
 
@@ -140,7 +182,9 @@ sri({
 
 When building for SSR, if no HTML files are emitted, the plugin logs a warning to help diagnose why SRI wasn't applied:
 
-> No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
+```bash
+No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
+```
 
 ## Examples
 
@@ -150,23 +194,21 @@ Configure multiple HTML inputs so Vite emits several .html files. The plugin wil
 
 ```ts
 // vite.config.ts
-import { defineConfig } from 'vite'
-import sri from 'vite-plugin-sri-gen'
+import { defineConfig } from "vite";
+import sri from "vite-plugin-sri-gen";
 
 export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: 'index.html',
-        about: 'about/index.html',
-        admin: 'admin/index.html',
+        main: "index.html",
+        about: "about/index.html",
+        admin: "admin/index.html",
       },
     },
   },
-  plugins: [
-    sri({ crossorigin: 'anonymous' }),
-  ],
-})
+  plugins: [sri({ crossorigin: "anonymous" })],
+});
 ```
 
 ### SSR/SSG with prerendered HTML
@@ -175,15 +217,13 @@ If your SSR/SSG setup emits static HTML during build (for example via a prerende
 
 ```ts
 // vite.config.ts
-import { defineConfig } from 'vite'
-import sri from 'vite-plugin-sri-gen'
+import { defineConfig } from "vite";
+import sri from "vite-plugin-sri-gen";
 
 export default defineConfig({
   // Your SSR/SSG tooling may set build.ssr, use a prerender plugin/step, etc.
-  plugins: [
-    sri(),
-  ],
-})
+  plugins: [sri()],
+});
 ```
 
 Notes:
@@ -196,17 +236,17 @@ Notes:
 Tune caching and timeouts for remote assets:
 
 ```ts
-import sri from 'vite-plugin-sri-gen'
+import sri from "vite-plugin-sri-gen";
 
 export default {
   plugins: [
     sri({
-      crossorigin: 'anonymous',
-      fetchCache: true,      // keep enabled for best performance
-      fetchTimeoutMs: 5000,  // fail fast if a CDN becomes slow or unresponsive
-    })
-  ]
-}
+      crossorigin: "anonymous",
+      fetchCache: true, // keep enabled for best performance
+      fetchTimeoutMs: 5000, // fail fast if a CDN becomes slow or unresponsive
+    }),
+  ],
+};
 ```
 
 ## Why ESM-only?

@@ -1,8 +1,7 @@
-import type { OutputBundle } from "rollup";
-import type { IndexHtmlTransformContext, Plugin, ResolvedConfig } from "vite";
+import type { NormalizedOutputOptions, OutputBundle } from "rollup";
+import type { Plugin, PluginOption, ResolvedConfig } from "vite";
 import type { BundleLogger } from "./internal";
 import {
-	addSriToHtml,
 	createLogger,
 	DynamicImportAnalyzer,
 	handleGenerateBundleError,
@@ -10,7 +9,6 @@ import {
 	installSriRuntime,
 	IntegrityProcessor,
 	validateGenerateBundleInputs,
-	type LoadResourceOptions,
 } from "./internal";
 
 /**
@@ -43,12 +41,7 @@ let logger: BundleLogger;
  * @param options - Configuration options for the plugin
  * @returns Vite plugin with SRI processing capabilities
  */
-export default function sri(options: SriPluginOptions = {}): Plugin & {
-	transformIndexHtml(
-		html: string,
-		context: IndexHtmlTransformContext
-	): Promise<string>;
-} {
+export default function sri(options: SriPluginOptions = {}): PluginOption {
 	let algorithm: "sha256" | "sha384" | "sha512" =
 		options.algorithm ?? "sha384";
 	const crossorigin = options.crossorigin;
@@ -68,13 +61,11 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
 
-	const plugin = {
+	const plugin: Plugin = {
 		name: "vite-plugin-sri-gen",
 		enforce: "post",
 		// Only run during `vite build`
 		apply: "build",
-		order: "post",
-		sequential: true,
 
 		configResolved(config: ResolvedConfig): void {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
@@ -95,102 +86,92 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 				algorithm = "sha384";
 			}
 		},
+		generateBundle: {
+			order: "post",
+			handler: async function (
+				this: any,
+				_options: NormalizedOutputOptions,
+				bundle: OutputBundle,
+				_isWrite: boolean
+			) {
+				/**
+				 * Main entry point for SRI processing after bundle write completion.
+				 * This function orchestrates the entire SRI generation workflow:
+				 * 1. Validates input parameters and initializes logging
+				 * 2. Builds integrity mappings for all processable assets
+				 * 3. Discovers and maps dynamic import relationships
+				 * 4. Processes HTML files to inject SRI attributes and preload links
+				 *
+				 * @param options - Rollup generation options (unused but required by interface)
+				 * @param bundle - Output bundle containing all generated assets and chunks
+				 * @returns Promise<void> - Completes when all SRI processing is finished
+				 */
 
-		async transformIndexHtml(
-			html: string,
-			context: IndexHtmlTransformContext
-		) {
-			const resourceOpts: LoadResourceOptions = {
-				cache: remoteCache,
-				pending,
-				enableCache,
-				fetchTimeoutMs,
-			};
-			return addSriToHtml(html, context?.bundle as any, logger, {
-				algorithm,
-				crossorigin,
-				resourceOpts,
-				skipResources,
-			});
-		},
+				// Initialize robust logging system with fallback chain
+				logger = createLogger(this);
 
-		async writeBundle(_options: unknown, bundle: OutputBundle) {
-			/**
-			 * Main entry point for SRI processing after bundle write completion.
-			 * This function orchestrates the entire SRI generation workflow:
-			 * 1. Validates input parameters and initializes logging
-			 * 2. Builds integrity mappings for all processable assets
-			 * 3. Discovers and maps dynamic import relationships
-			 * 4. Processes HTML files to inject SRI attributes and preload links
-			 *
-			 * @param _options - Rollup generation options (unused but required by interface)
-			 * @param bundle - Output bundle containing all generated assets and chunks
-			 * @returns Promise<void> - Completes when all SRI processing is finished
-			 */
-
-			// Initialize robust logging system with fallback chain
-			logger = createLogger(this);
-
-			try {
-				// Step 1: Validate inputs and early return conditions
-				const validationResult = validateGenerateBundleInputs(
-					bundle,
-					isSSR
-				);
-				if (!validationResult.isValid) {
-					if (
-						validationResult.shouldWarn &&
-						validationResult.message
-					) {
-						logger.warn(validationResult.message);
+				try {
+					// Step 1: Validate inputs and early return conditions
+					const validationResult = validateGenerateBundleInputs(
+						bundle,
+						isSSR
+					);
+					if (!validationResult.isValid) {
+						if (
+							validationResult.shouldWarn &&
+							validationResult.message
+						) {
+							logger.warn(validationResult.message);
+						}
+						return;
 					}
-					return;
+
+					// Step 2: Build comprehensive integrity mappings for all assets
+					logger.info(
+						"Building SRI integrity mappings for bundle assets"
+					);
+					const integrityProcessor = new IntegrityProcessor(
+						algorithm,
+						logger
+					);
+					sriByPathname =
+						await integrityProcessor.buildIntegrityMappings(bundle);
+
+					// Step 3: Discover and map dynamic import relationships
+					logger.info("Analyzing dynamic import relationships");
+					const dynamicImportAnalyzer = new DynamicImportAnalyzer(
+						logger
+					);
+					dynamicChunkFiles =
+						dynamicImportAnalyzer.analyzeDynamicImports(bundle);
+
+					// Step 4: Process HTML files with comprehensive error handling
+					logger.info("Processing HTML files for SRI injection");
+					const htmlProcessor = new HtmlProcessor({
+						algorithm,
+						crossorigin,
+						base,
+						preloadDynamicChunks,
+						enableCache,
+						remoteCache,
+						pending,
+						fetchTimeoutMs,
+						logger,
+						skipResources,
+					});
+
+					await htmlProcessor.processHtmlFiles(
+						bundle,
+						sriByPathname,
+						dynamicChunkFiles
+					);
+
+					logger.info("SRI generation completed successfully");
+				} catch (error) {
+					handleGenerateBundleError(error, logger);
+					throw error; // Re-throw to maintain error propagation
 				}
-
-				// Step 2: Build comprehensive integrity mappings for all assets
-				logger.info(
-					"Building SRI integrity mappings for bundle assets"
-				);
-				const integrityProcessor = new IntegrityProcessor(
-					algorithm,
-					logger
-				);
-				sriByPathname = await integrityProcessor.buildIntegrityMappings(
-					bundle
-				);
-
-				// Step 3: Discover and map dynamic import relationships
-				logger.info("Analyzing dynamic import relationships");
-				const dynamicImportAnalyzer = new DynamicImportAnalyzer(logger);
-				dynamicChunkFiles =
-					dynamicImportAnalyzer.analyzeDynamicImports(bundle);
-
-				// Step 4: Process HTML files with comprehensive error handling
-				logger.info("Processing HTML files for SRI injection");
-				const htmlProcessor = new HtmlProcessor({
-					algorithm,
-					crossorigin,
-					base,
-					preloadDynamicChunks,
-					enableCache,
-					remoteCache,
-					pending,
-					fetchTimeoutMs,
-					logger,
-					skipResources,
-				});
-
-				await htmlProcessor.processHtmlFiles(
-					bundle,
-					sriByPathname,
-					dynamicChunkFiles
-				);
-
-				logger.info("SRI generation completed successfully");
-			} catch (error) {
-				handleGenerateBundleError(error, logger);
-				throw error; // Re-throw to maintain error propagation
-			}
+			},
 		},
 
 		// Prepend a tiny runtime to entry chunks to set integrity on dynamic <link>/<script>
@@ -207,7 +188,7 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 			const injected = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns} });\n`;
 			return { code: injected + code, map: null };
 		},
-	} as any;
+	};
 
 	return plugin;
 }

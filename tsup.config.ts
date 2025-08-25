@@ -10,7 +10,7 @@ export default defineConfig({
   minify: true,
   treeshake: true,
   splitting: false,
-  sourcemap: false,
+  sourcemap: true,
   bundle: true,
   keepNames: false,
   minifyWhitespace: true,
