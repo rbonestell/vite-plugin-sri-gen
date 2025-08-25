@@ -505,9 +505,6 @@ export async function processElement(
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
-	// Skip elements that already have integrity
-	// if (getAttrValue(element, "integrity")) return;
-
 	// Determine the URL attribute name (src or href)
 	const attrName = getUrlAttrName(element);
 	if (!attrName) return;
