@@ -1,6 +1,6 @@
 {
 	"name": "vite-plugin-sri-gen",
-	"version": "1.2.1",
+	"version": "1.2.2",
 	"description": "A Vite plugin to auto-generate Subresource Integrity (SRI) hashes.",
 	"type": "module",
 	"types": "./dist/index.d.ts",
@@ -13,7 +13,6 @@
 	"scripts": {
 		"build": "tsup",
 		"clean": "rimraf dist",
-		"prepare": "npm run build",
 		"prepublishOnly": "npm run build",
 		"test": "vitest",
 		"test:cov": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=lcov",
