@@ -12,10 +12,13 @@ import {
 	HtmlProcessor,
 	installSriRuntime,
 	IntegrityProcessor,
+	isEligibleForSri,
 	isHttpUrl,
 	loadResource,
+	matchesPattern,
 	normalizeBundlePath,
 	processElement,
+	shouldSkipElement,
 	validateGenerateBundleInputs,
 } from "../src/internal";
 import { createMockBundleLogger, createMockPluginContext, mockBundle, spyOnConsole } from "./mocks/bundle-logger";
@@ -961,6 +964,7 @@ describe("Processing Classes", () => {
 				pending: new Map(),
 				fetchTimeoutMs: 5000,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1003,6 +1007,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1036,6 +1041,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1071,6 +1077,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1104,6 +1111,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1137,6 +1145,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1163,6 +1172,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1189,6 +1199,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1224,6 +1235,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1269,6 +1281,7 @@ describe("Processing Classes", () => {
 				enableCache: false,
 				fetchTimeoutMs: 0,
 				logger: mockLogger,
+				skipResources: [],
 			};
 
 			const processor = new HtmlProcessor(config);
@@ -1721,6 +1734,481 @@ describe("Additional Edge Cases and Error Paths", () => {
 			// Verify all scripts got integrity attributes
 			const integrityCount = (result.match(/integrity=/g) || []).length;
 			expect(integrityCount).toBe(100);
+		});
+	});
+
+	describe("Skip Resources Functionality", () => {
+		describe("matchesPattern", () => {
+			it("matches exact patterns", () => {
+				expect(matchesPattern("exact.js", "exact.js")).toBe(true);
+				expect(matchesPattern("exact.js", "different.js")).toBe(false);
+			});
+
+			it("matches wildcard patterns", () => {
+				expect(matchesPattern("*.js", "script.js")).toBe(true);
+				expect(matchesPattern("*.js", "script.css")).toBe(false);
+				expect(matchesPattern("vendor-*", "vendor-react")).toBe(true);
+				expect(matchesPattern("vendor-*", "custom-react")).toBe(false);
+			});
+
+			it("handles complex patterns", () => {
+				expect(matchesPattern("*analytics*", "google-analytics-v1.js")).toBe(true);
+				expect(matchesPattern("*.googleapis.com/*", "fonts.googleapis.com/style.css")).toBe(true);
+				expect(matchesPattern("lib-*.min.js", "lib-jquery.min.js")).toBe(true);
+				expect(matchesPattern("lib-*.min.js", "lib-jquery.js")).toBe(false);
+			});
+
+			it("handles edge cases", () => {
+				expect(matchesPattern("", "test")).toBe(false);
+				expect(matchesPattern("test", "")).toBe(false);
+				expect(matchesPattern("", "")).toBe(false);
+				expect(matchesPattern("*", "anything")).toBe(true);
+				expect(matchesPattern("*.*", "file.ext")).toBe(true);
+			});
+
+			it("escapes special regex characters", () => {
+				expect(matchesPattern("test.js", "testXjs")).toBe(false); // . should be literal
+				expect(matchesPattern("test+js", "test+js")).toBe(true); // + should be literal
+				expect(matchesPattern("test(1)", "test(1)")).toBe(true); // parentheses should be literal
+			});
+		});
+
+		describe("shouldSkipElement", () => {
+			const createMockElement = (attrs: Record<string, string>): Element => {
+				return {
+					nodeName: "script",
+					attrs: Object.entries(attrs).map(([name, value]) => ({ name, value })),
+				} as Element;
+			};
+
+			it("returns false when no skip patterns provided", () => {
+				const element = createMockElement({ src: "test.js" });
+				expect(shouldSkipElement(element, [])).toBe(false);
+				expect(shouldSkipElement(element, undefined as any)).toBe(false);
+			});
+
+			it("skips elements by ID", () => {
+				const element = createMockElement({ id: "analytics-script", src: "test.js" });
+				expect(shouldSkipElement(element, ["analytics-*"])).toBe(true);
+				expect(shouldSkipElement(element, ["different-*"])).toBe(false);
+			});
+
+			it("skips elements by src attribute", () => {
+				const element = createMockElement({ src: "google-analytics.js" });
+				expect(shouldSkipElement(element, ["*analytics*"])).toBe(true);
+				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(false);
+			});
+
+			it("skips elements by href attribute", () => {
+				const element = createMockElement({ href: "fonts.googleapis.com/css" });
+				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(true);
+				expect(shouldSkipElement(element, ["*analytics*"])).toBe(false);
+			});
+
+			it("matches multiple patterns", () => {
+				const element = createMockElement({ src: "vendor-react.js" });
+				expect(shouldSkipElement(element, ["*analytics*", "vendor-*", "*.min.js"])).toBe(true);
+			});
+
+			it("returns false when no attributes match", () => {
+				const element = createMockElement({ src: "custom.js", id: "main-script" });
+				expect(shouldSkipElement(element, ["*analytics*", "vendor-*"])).toBe(false);
+			});
+		});
+
+		describe("addSriToHtml with skip patterns", () => {
+			it("skips elements matching skip patterns", async () => {
+				const mockLogger = createMockBundleLogger();
+				const html = `
+					<html>
+						<head>
+							<script id="analytics" src="/analytics.js"></script>
+							<script src="/main.js"></script>
+							<link rel="stylesheet" href="/vendor.css" />
+							<link rel="stylesheet" href="/main.css" />
+						</head>
+					</html>
+				`;
+
+				const bundle = mockBundle({
+					"analytics.js": "console.log('analytics')",
+					"main.js": "console.log('main')",
+					"vendor.css": ".vendor{}",
+					"main.css": ".main{}",
+				});
+
+				const result = await addSriToHtml(html, bundle, mockLogger, {
+					skipResources: ["analytics", "*vendor*"],
+				});
+
+				// Should have integrity for main.js and main.css only
+				expect(result).toContain('src="/main.js" integrity=');
+				expect(result).toContain('href="/main.css" integrity=');
+				
+				// Should NOT have integrity for analytics.js and vendor.css
+				expect(result).not.toContain('src="/analytics.js" integrity=');
+				expect(result).not.toContain('href="/vendor.css" integrity=');
+				
+				// But the elements should still be present
+				expect(result).toContain('src="/analytics.js"');
+				expect(result).toContain('href="/vendor.css"');
+			});
+
+			it("works with empty skip patterns", async () => {
+				const mockLogger = createMockBundleLogger();
+				const html = `<html><head><script src="/test.js"></script></head></html>`;
+				const bundle = mockBundle({ "test.js": "console.log('test')" });
+
+				const result = await addSriToHtml(html, bundle, mockLogger, {
+					skipResources: [],
+				});
+
+				expect(result).toContain('integrity=');
+			});
+		});
+
+		describe("Advanced Pattern Matching Tests", () => {
+			it("handles real-world tracking and analytics patterns", () => {
+				const trackingPatterns = [
+					"*analytics*", "*googletagmanager*", "*facebook*", "*google-analytics*", 
+					"*hotjar*", "*mixpanel*", "*segment*", "*amplitude*"
+				];
+
+				const testUrls = [
+					"https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID",
+					"https://connect.facebook.net/en_US/fbevents.js",
+					"https://static.hotjar.com/c/hotjar-1234567.js?sv=6",
+					"https://cdn.segment.com/analytics.js/v1/abc123/analytics.min.js",
+					"https://cdn.amplitude.com/libs/amplitude-8.17.0-min.gz.js",
+					"https://api.mixpanel.com/track/",
+					"https://www.google-analytics.com/analytics.js"
+				];
+
+				testUrls.forEach((url, index) => {
+					const matchingPattern = trackingPatterns.find(pattern => matchesPattern(pattern, url));
+					expect(matchingPattern, `URL ${index} (${url}) should match at least one pattern`).toBeDefined();
+				});
+			});
+
+			it("handles CDN and external library patterns", () => {
+				const cdnPatterns = [
+					"*.googleapis.com/*", "*unpkg.com/*", "*.jsdelivr.net/*",
+					"*.cloudflare.com/*", "*.bootstrapcdn.com/*"
+				];
+
+				const testUrls = [
+					"https://fonts.googleapis.com/css2?family=Inter:wght@400;600",
+					"https://unpkg.com/vue@3/dist/vue.global.prod.js",
+					"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css",
+					"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js",
+					"https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+				];
+
+				testUrls.forEach(url => {
+					expect(cdnPatterns.some(pattern => matchesPattern(pattern, url))).toBe(true);
+				});
+			});
+
+			it("handles versioned and hashed filenames", () => {
+				const versionPatterns = [
+					"*-v*.js", "*.min.*", "*.*.js", "*.*.css",
+					"vendor-*.js", "chunk-*.js"
+				];
+
+				const testFiles = [
+					"jquery-v3.6.0.min.js",  // Matches "*-v*.js"
+					"bootstrap.min.css",     // Matches "*.min.*"
+					"app.abc123.js",         // Matches "*.*.js"
+					"styles.def456.css",     // Matches "*.*.css"
+					"vendor-libs.js",        // Matches "vendor-*.js"
+					"chunk-runtime.789xyz.js" // Matches "chunk-*.js"
+				];
+
+				testFiles.forEach(file => {
+					const matchingPattern = versionPatterns.find(pattern => matchesPattern(pattern, file));
+					expect(matchingPattern).toBeDefined();
+				});
+			});
+
+			it("handles Unicode and special characters in patterns", () => {
+				const unicodeTests = [
+					{ pattern: "*café*.js", test: "main-café-script.js", expected: true },
+					{ pattern: "*测试*.css", test: "app-测试-styles.css", expected: true },
+					{ pattern: "*🚀*.js", test: "rocket🚀app.js", expected: true },
+					{ pattern: "*%20*", test: "file%20with%20spaces.js", expected: true },
+					{ pattern: "*&*", test: "script&param=value.js", expected: true }
+				];
+
+				unicodeTests.forEach(({ pattern, test, expected }) => {
+					expect(matchesPattern(pattern, test)).toBe(expected);
+				});
+			});
+
+			it("validates case sensitivity behavior", () => {
+				const caseSensitiveTests = [
+					{ pattern: "*.JS", test: "script.js", expected: false },
+					{ pattern: "*.js", test: "script.JS", expected: false },
+					{ pattern: "*Analytics*", test: "google-analytics.js", expected: false },
+					{ pattern: "*analytics*", test: "Google-Analytics.js", expected: false }
+				];
+
+				caseSensitiveTests.forEach(({ pattern, test, expected }) => {
+					expect(matchesPattern(pattern, test)).toBe(expected);
+				});
+			});
+		});
+
+		describe("isEligibleForSri with skip patterns - Integration Tests", () => {
+			const createMockElement = (nodeName: string, attrs: Record<string, string>): Element => ({
+				nodeName,
+				tagName: nodeName.toUpperCase(),
+				attrs: Object.entries(attrs).map(([name, value]) => ({ name, value })),
+				childNodes: [],
+				parentNode: null,
+				namespaceURI: "http://www.w3.org/1999/xhtml",
+				sourceCodeLocation: undefined,
+			} as Element);
+
+			it("skips eligible elements when they match skip patterns", () => {
+				const scriptElement = createMockElement("script", { src: "/analytics.js", id: "ga-script" });
+				const linkElement = createMockElement("link", { rel: "stylesheet", href: "/vendor.css" });
+				const preloadElement = createMockElement("link", { rel: "modulepreload", href: "/chunk.js" });
+
+				// Without skip patterns - should be eligible
+				expect(isEligibleForSri(scriptElement)).toBe(true);
+				expect(isEligibleForSri(linkElement)).toBe(true);
+				expect(isEligibleForSri(preloadElement)).toBe(true);
+
+				// With skip patterns - should be skipped
+				expect(isEligibleForSri(scriptElement, ["*analytics*"])).toBe(false);
+				expect(isEligibleForSri(scriptElement, ["ga-*"])).toBe(false);
+				expect(isEligibleForSri(linkElement, ["*vendor*"])).toBe(false);
+				expect(isEligibleForSri(preloadElement, ["*.js"])).toBe(false);
+
+				// With non-matching patterns - should still be eligible
+				expect(isEligibleForSri(scriptElement, ["*tracking*"])).toBe(true);
+				expect(isEligibleForSri(linkElement, ["*.googleapis.com/*"])).toBe(true);
+				expect(isEligibleForSri(preloadElement, ["*main*"])).toBe(true);
+			});
+
+			it("handles complex element types with skip patterns", () => {
+				// Preload link with as="script"
+				const preloadScript = createMockElement("link", { 
+					rel: "preload", 
+					as: "script", 
+					href: "https://cdn.jsdelivr.net/lib.js" 
+				});
+				expect(isEligibleForSri(preloadScript)).toBe(true);
+				expect(isEligibleForSri(preloadScript, ["*jsdelivr*"])).toBe(false);
+
+				// Preload link with as="style"
+				const preloadStyle = createMockElement("link", { 
+					rel: "preload", 
+					as: "style", 
+					href: "https://fonts.googleapis.com/css" 
+				});
+				expect(isEligibleForSri(preloadStyle)).toBe(true);
+				expect(isEligibleForSri(preloadStyle, ["*.googleapis.com/*"])).toBe(false);
+			});
+
+			it("maintains backward compatibility when no skip patterns provided", () => {
+				const elements = [
+					createMockElement("script", { src: "/main.js" }),
+					createMockElement("link", { rel: "stylesheet", href: "/style.css" }),
+					createMockElement("link", { rel: "modulepreload", href: "/chunk.js" }),
+					createMockElement("div", { id: "content" }) // Not eligible
+				];
+
+				elements.forEach(element => {
+					const withoutPatterns = isEligibleForSri(element);
+					const withEmptyPatterns = isEligibleForSri(element, []);
+					const withUndefinedPatterns = isEligibleForSri(element, undefined);
+
+					expect(withoutPatterns).toBe(withEmptyPatterns);
+					expect(withoutPatterns).toBe(withUndefinedPatterns);
+				});
+			});
+		});
+
+		describe("End-to-End Skip Resources Integration", () => {
+			it("integrates skip patterns with HTML processing pipeline", async () => {
+				const mockLogger = createMockBundleLogger();
+				const html = `
+					<html>
+						<head>
+							<script id="analytics" src="/ga.js"></script>
+							<script src="/main.js"></script>
+							<link rel="stylesheet" href="/vendor.css" />
+							<link rel="stylesheet" href="/app.css" />
+							<link rel="modulepreload" href="/dynamic.js" />
+							<link rel="preload" as="script" href="/lib.js" />
+						</head>
+					</html>
+				`;
+
+				const bundle = mockBundle({
+					"ga.js": "console.log('analytics')",
+					"main.js": "console.log('main')",
+					"vendor.css": ".vendor{}",
+					"app.css": ".app{}",
+					"dynamic.js": "export default 'dynamic'",
+					"lib.js": "window.lib = {}",
+				});
+
+				// Test with comprehensive skip patterns
+				const result = await addSriToHtml(html, bundle, mockLogger, {
+					skipResources: ["analytics", "*vendor*", "*ga*"],
+				});
+
+				// Should have integrity for main.js, app.css, dynamic.js, and lib.js
+				expect(result).toContain('src="/main.js" integrity=');
+				expect(result).toContain('href="/app.css" integrity=');
+				expect(result).toContain('href="/dynamic.js" integrity=');
+				expect(result).toContain('href="/lib.js" integrity=');
+				
+				// Should NOT have integrity for skipped resources
+				expect(result).not.toContain('src="/ga.js" integrity=');
+				expect(result).not.toContain('href="/vendor.css" integrity=');
+				
+				// But skipped elements should still be present
+				expect(result).toContain('id="analytics"');
+				expect(result).toContain('src="/ga.js"');
+				expect(result).toContain('href="/vendor.css"');
+			});
+
+			it("handles mixed local and external resources with skip patterns", async () => {
+				const mockLogger = createMockBundleLogger();
+				const html = `
+					<html>
+						<head>
+							<script src="https://www.googletagmanager.com/gtag/js"></script>
+							<script src="/app.js"></script>
+							<link href="https://fonts.googleapis.com/css2" rel="stylesheet" />
+							<link href="/styles.css" rel="stylesheet" />
+						</head>
+					</html>
+				`;
+
+				const bundle = mockBundle({
+					"app.js": "console.log('app')",
+					"styles.css": ".styles{}",
+				});
+
+				const result = await addSriToHtml(html, bundle, mockLogger, {
+					skipResources: ["*.googletagmanager.com/*", "*.googleapis.com/*"],
+				});
+
+				// Should have integrity for local resources only
+				expect(result).toContain('src="/app.js" integrity=');
+				expect(result).toContain('href="/styles.css" rel="stylesheet" integrity=');
+				
+				// Should NOT have integrity for external CDN resources
+				expect(result).not.toContain('googletagmanager.com/gtag/js" integrity=');
+				expect(result).not.toContain('fonts.googleapis.com/css2" integrity=');
+			});
+
+			it("validates performance impact with large skip pattern lists", async () => {
+				const mockLogger = createMockBundleLogger();
+				
+				// Create large pattern list
+				const skipPatterns = [];
+				for (let i = 0; i < 100; i++) {
+					skipPatterns.push(`*analytics-${i}*`);
+					skipPatterns.push(`*tracking-${i}*`);
+					skipPatterns.push(`vendor-${i}-*`);
+				}
+
+				// Create HTML with many elements
+				const scripts = Array(50).fill(0).map((_, i) => 
+					`<script src="/script-${i}.js"></script>`
+				).join('');
+				const html = `<html><head>${scripts}</head></html>`;
+
+				const bundle = mockBundle(
+					Object.fromEntries(
+						Array(50).fill(0).map((_, i) => [`script-${i}.js`, `console.log(${i})`])
+					)
+				);
+
+				const start = performance.now();
+				
+				const result = await addSriToHtml(html, bundle, mockLogger, {
+					skipResources: skipPatterns,
+				});
+				
+				const end = performance.now();
+				const duration = end - start;
+				
+				// Should complete within reasonable time even with large pattern list
+				expect(duration).toBeLessThan(500); // 500ms max
+				
+				// All scripts should have integrity (none match skip patterns)
+				const integrityCount = (result.match(/integrity=/g) || []).length;
+				expect(integrityCount).toBe(50);
+			});
+		});
+
+		describe("Error Handling and Edge Cases", () => {
+			// Helper function to create test elements
+			const createTestElement = (nodeName: string, attrs: { name: string; value: string }[]): Element => ({
+				nodeName,
+				tagName: nodeName,
+				attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
+				namespaceURI: "http://www.w3.org/1999/xhtml",
+				childNodes: [],
+				parentNode: null,
+				sourceCodeLocation: undefined,
+			} as Element);
+
+			it("handles malformed patterns gracefully", () => {
+				const malformedPatterns = [
+					"***", // Multiple wildcards
+					"", // Empty pattern
+					"   ", // Whitespace-only
+					"\\", // Single backslash
+					"[[[", // Unmatched brackets
+					"(((" // Unmatched parentheses
+				];
+
+				const testElement = createTestElement("script", [{ name: "src", value: "test.js" }]);
+				
+				malformedPatterns.forEach(pattern => {
+					// Should not throw and should handle gracefully
+					expect(() => {
+						shouldSkipElement(testElement, [pattern]);
+					}).not.toThrow();
+				});
+			});
+
+			it("handles very long patterns and URLs efficiently", () => {
+				const longPath = "a/".repeat(1000) + "file.js";
+				const longPattern = "*/" + "long/".repeat(500) + "*";
+				
+				const start = performance.now();
+				const result = matchesPattern(longPattern, longPath);
+				const end = performance.now();
+				
+				expect(typeof result).toBe("boolean");
+				expect(end - start).toBeLessThan(10); // Should be very fast
+			});
+
+			it("maintains performance with stress testing", () => {
+				const patterns = ["*analytics*", "vendor-*", "*.googleapis.com/*", "*tracking*"];
+				
+				const start = performance.now();
+				
+				// Process 5000 elements
+				for (let i = 0; i < 5000; i++) {
+					const element = createTestElement("script", [
+						{ name: "src", value: `script-${i}.js` },
+						{ name: "id", value: `element-${i}` }
+					]);
+					shouldSkipElement(element, patterns);
+				}
+				
+				const end = performance.now();
+				expect(end - start).toBeLessThan(100); // Should complete in under 100ms
+			});
 		});
 	});
 });

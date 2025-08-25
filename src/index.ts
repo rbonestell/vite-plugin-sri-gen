@@ -30,6 +30,8 @@ export interface SriPluginOptions {
 	preloadDynamicChunks?: boolean;
 	/** Inject a tiny runtime that sets integrity on dynamically inserted <script>/<link>. Default: true */
 	runtimePatchDynamicLinks?: boolean;
+	/** Skip SRI generation for resources matching these patterns. Supports exact matches and simple glob patterns with '*'. */
+	skipResources?: string[];
 }
 
 let logger: BundleLogger;
@@ -59,6 +61,7 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 	let isSSR = false;
 	const preloadDynamicChunks = options.preloadDynamicChunks !== false; // default true
 	const runtimePatchDynamicLinks = options.runtimePatchDynamicLinks !== false; // default true
+	const skipResources = options.skipResources ?? []; // default empty array
 
 	// Build-time state
 	let base = "/";
@@ -107,6 +110,7 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 				algorithm,
 				crossorigin,
 				resourceOpts,
+				skipResources,
 			});
 		},
 
@@ -173,6 +177,7 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 					pending,
 					fetchTimeoutMs,
 					logger,
+					skipResources,
 				});
 
 				await htmlProcessor.processHtmlFiles(
@@ -198,7 +203,8 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 
 			const serializedMap = JSON.stringify(sriByPathname);
 			const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
-			const injected = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors} });\n`;
+			const serializedSkipPatterns = JSON.stringify(skipResources);
+			const injected = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns} });\n`;
 			return { code: injected + code, map: null };
 		},
 	} as any;

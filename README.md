@@ -44,6 +44,7 @@ export default {
       crossorigin: 'anonymous',  // 'anonymous' | 'use-credentials' | undefined
       fetchCache: true,          // cache remote fetches in-memory and dedupe concurrent requests (default: true)
       fetchTimeoutMs: 5000,      // abort remote fetches after N ms; 0 disables timeout (default: 5000)
+      skipResources: [],         // skip SRI for resources matching these patterns (default: [])
     })
   ]
 }
@@ -82,6 +83,7 @@ type SriPluginOptions = {
   fetchTimeoutMs?: number, // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
   preloadDynamicChunks?: boolean, // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks
   runtimePatchDynamicLinks?: boolean, // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
+  skipResources?: string[], // default: []. Skip SRI for resources matching these patterns (by id or src/href)
 }
 ```
 
@@ -94,6 +96,35 @@ Notes:
 - Invalid or unsupported algorithms are automatically replaced with 'sha384' and a warning is logged.
 - Caching: when enabled, remote fetches are cached in-memory per build and concurrent requests are deduplicated.
 - Timeout: when a non-zero fetchTimeoutMs is set, slow remote fetches are aborted and the affected elements are left unchanged (a warning is logged).
+
+### Skipping Resources
+
+You can exclude specific resources from SRI generation using the `skipResources` option. This is useful for third-party scripts, analytics, or dynamically-loaded content that may change frequently:
+
+```ts
+sri({
+  skipResources: [
+    'analytics-script',              // Skip by element ID
+    'https://www.googletagmanager.com/*', // Skip by URL pattern
+    '*/gtm.js',                      // Skip Google Tag Manager
+    'vendor-*',                      // Skip vendor assets by pattern
+    '*.googleapis.com/*',            // Skip Google APIs
+  ]
+})
+```
+
+**Pattern Types:**
+- **Element ID**: Matches the `id` attribute value exactly (`'analytics-script'`)
+- **URL Exact Match**: Matches `src` or `href` attribute exactly (`'https://example.com/script.js'`)
+- **URL Glob Pattern**: Use `*` as wildcard in URL patterns (`'*.googleapis.com/*'`, `'vendor-*'`)
+
+**Use Cases:**
+- Third-party analytics scripts that change frequently
+- A/B testing scripts with dynamic content
+- CDN resources that may be modified by the provider
+- Development/staging resources that shouldn't have integrity checks
+
+**Note**: Skipped elements will not have `integrity` attributes added, allowing them to be modified by CDNs or served with different content without breaking the page.
 
 ### Lazy-loaded chunks and dynamic tags
 
