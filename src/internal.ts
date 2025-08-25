@@ -120,8 +120,8 @@ export function normalizeBundlePath(p: unknown): unknown {
 	if (p.startsWith("//")) return p.slice(2);
 	// Strip leading slash (Vite bundle keys are relative)
 	if (p.startsWith("/")) return p.slice(1);
-	// Strip leading . (relative path prefix)
-	if (p.startsWith(".")) return p.slice(1);
+	// Strip leading ./ (relative path prefix)
+	if (p.startsWith("./")) return p.slice(2);
 	return p;
 }
 
