@@ -3,7 +3,6 @@ import sri from "../src/index";
 import { installSriRuntime, installSriRuntimeWithDeps } from "../src/internal";
 import {
 	createMockPluginContext,
-	mockBundle,
 	spyOnConsole,
 } from "./mocks/bundle-logger";
 import {
@@ -145,69 +144,7 @@ function setupFakeDom(withInsertFns = false) {
 autoSetupConsoleMock();
 
 describe("vite-plugin-sri-gen", () => {
-	describe("Basic Plugin Functionality", () => {
-		it("adds integrity to scripts and links", async () => {
-			const plugin = sri({ algorithm: "sha256" });
-
-			const html = `<!doctype html>
-<html>
-  <head>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="modulepreload" href="/entry.js">
-  </head>
-  <body>
-    <script type="module" src="/entry.js"></script>
-  </body>
-</html>`;
-
-			const fakeCtx = createMockPluginContext();
-			fakeCtx.error = vi.fn().mockImplementation((e: any) => {
-				throw e instanceof Error ? e : new Error(String(e));
-			});
-
-			const out = await plugin.transformIndexHtml!.call(fakeCtx, html, {
-				bundle: mockBundle({
-					"style.css": "body{color:red}",
-					"entry.js": 'console.log("hi")',
-				}),
-			} as any);
-
-			expect(out).toContain('integrity="sha256-');
-		});
-
-		it("does not overwrite existing integrity", async () => {
-			const plugin = sri({ algorithm: "sha256" });
-			const html = `<!doctype html><html><head>
-      <script src="/a.js" integrity="sha256-abc"></script>
-    </head></html>`;
-			const fakeCtx = createMockPluginContext();
-			fakeCtx.error = vi.fn().mockImplementation((e: any) => {
-				throw e;
-			});
-			const out = await plugin.transformIndexHtml!.call(fakeCtx, html, {
-				bundle: mockBundle({ "a.js": "console.log(1)" }),
-			} as any);
-			expect(out).toContain('integrity="sha256-abc"');
-		});
-
-		it("adds crossorigin when provided", async () => {
-			const plugin = sri({
-				algorithm: "sha256",
-				crossorigin: "anonymous",
-			});
-			const html = `<!doctype html><html><head>
-      <link rel="stylesheet" href="/a.css" />
-    </head></html>`;
-			const fakeCtx = createMockPluginContext();
-			fakeCtx.error = vi.fn().mockImplementation((e: any) => {
-				throw e;
-			});
-			const out = await plugin.transformIndexHtml!.call(fakeCtx, html, {
-				bundle: mockBundle({ "a.css": "body{ }" }),
-			} as any);
-			expect(out).toContain('crossorigin="anonymous"');
-		});
-
+	describe("Basic Plugin Configuration", () => {
 		it('is build-only (apply = "build")', () => {
 			const plugin = sri() as any;
 			expect(plugin.apply).toBe("build");
@@ -231,13 +168,13 @@ describe("vite-plugin-sri-gen", () => {
 				"entry.js": { code: "console.log(1)" },
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			const out = String(bundle["index.html"].source);
 			expect(out).toContain('integrity="sha256-');
 			expect(out).toContain('crossorigin="anonymous"');
 		});
 
-		it("preserves existing integrity in emitted HTML", async () => {
+		it("overwrites existing integrity in emitted HTML", async () => {
 			const plugin = sri({ algorithm: "sha256" }) as any;
 			const html = `<!doctype html><html><head>
         <script src="/a.js" integrity="sha256-abc"></script>
@@ -247,9 +184,12 @@ describe("vite-plugin-sri-gen", () => {
 				"a.js": { code: "console.log(1)" },
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			const out = String(bundle["index.html"].source);
-			expect(out).toContain('integrity="sha256-abc"');
+			// Should calculate fresh integrity, not preserve existing
+			expect(out).toContain(
+				'integrity="sha256-CihokcEcBW4atb/CW/XWsvWwbTjqwQlE9nj9ii5ww5M="'
+			);
 		});
 
 		it("warns on SSR build with no emitted HTML", async () => {
@@ -262,7 +202,7 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: true },
 			} as any);
 			const bundle: any = { "entry.js": { code: "console.log(1)" } };
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			expect(spies.warn).toHaveBeenCalled();
 			cleanup();
 		});
@@ -279,7 +219,7 @@ describe("vite-plugin-sri-gen", () => {
 				"index.html": { type: "asset", source: badSource },
 				"entry.js": { code: "console.log(1)" },
 			};
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			expect(spies.warn).toHaveBeenCalled();
 			cleanup();
 		});
@@ -295,7 +235,7 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: false },
 			} as any);
 			const bundle: any = { "entry.js": { code: "console.log(1)" } };
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			expect(spies.warn).not.toHaveBeenCalled();
 			cleanup();
 		});
@@ -311,7 +251,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 				"a.js": { code: "console.log(1)" },
 			};
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			const out = String(bundle["index.html"].source);
 			expect(out).toContain("integrity=");
 		});
@@ -327,7 +267,8 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: true },
 			} as any);
 			// Call with plugin context containing warn()
-			await plugin.writeBundle.call(mockContext, {}, {} as any);
+			const bundle: any = { "entry.js": { code: "console.log(1)" } };
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
 			expect(mockContext.warn).toHaveBeenCalled();
 		});
 	});
@@ -338,7 +279,7 @@ describe("vite-plugin-sri-gen", () => {
 			const mockContext = createMockPluginContext();
 
 			// First create the logger by calling generateBundle once
-			await plugin.writeBundle.call(mockContext, {}, {
+			await plugin.generateBundle.handler.call(mockContext, {}, {
 				"test.js": { type: "chunk", code: "console.log('test')" },
 			} as any);
 
@@ -350,16 +291,16 @@ describe("vite-plugin-sri-gen", () => {
 				build: {},
 			} as any);
 
-			const html = `<!doctype html><html><head>
-        <script src="/a.js"></script>
-      </head></html>`;
-			const out = await plugin.transformIndexHtml.call(
-				mockContext,
-				html,
-				{
-					bundle: mockBundle({ "a.js": "console.log(1)" }),
-				} as any
-			);
+			// Test fallback by checking the bundle gets processed with sha384
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+				},
+				"a.js": { type: "chunk", code: "console.log(1)" },
+			};
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+			const out = String(bundle["index.html"].source);
 			expect(out).toContain('integrity="sha384-'); // fallback
 		});
 
@@ -373,19 +314,22 @@ describe("vite-plugin-sri-gen", () => {
 				build: {},
 			} as any);
 
-			const html = `<!doctype html><html><head>
-        <script src="/a.js"></script>
-      </head></html>`;
-			const out = await plugin.transformIndexHtml(html, {
-				bundle: mockBundle({ "a.js": "console.log(1)" }),
-			} as any);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+				},
+				"a.js": { type: "chunk", code: "console.log(1)" },
+			};
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+			const out = String(bundle["index.html"].source);
 			expect(out).toContain('integrity="sha512-');
 			expect(mockContext.warn).not.toHaveBeenCalled();
 		});
 	});
 
 	describe("Resource Options Wiring (cache & timeout)", () => {
-		it("uses shared cache and in-flight dedupe within a page transform", async () => {
+		it("uses shared cache and in-flight dedupe within bundle processing", async () => {
 			const plugin = sri({
 				algorithm: "sha256",
 				fetchCache: true,
@@ -398,14 +342,18 @@ describe("vite-plugin-sri-gen", () => {
 					arrayBuffer: () => Promise.resolve(bytes.buffer),
 				} as any);
 
-			const html = `<!doctype html><html><head>
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head>
         <script src="https://cdn.example.com/a.js"></script>
         <script src="https://cdn.example.com/a.js"></script>
-      </head></html>`;
+      </head></html>`,
+				},
+			};
 
-			const out = await plugin.transformIndexHtml(html, {
-				bundle: {},
-			} as any);
+			await plugin.generateBundle.handler({}, bundle);
+			const out = String(bundle["index.html"].source);
 			expect(out.match(/integrity="sha256-/g)?.length).toBe(2);
 			expect(fetchSpy).toHaveBeenCalledTimes(1);
 			fetchSpy.mockRestore();
@@ -429,13 +377,17 @@ describe("vite-plugin-sri-gen", () => {
 				}
 			);
 
-			const html = `<!doctype html><html><head>
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head>
         <script src="https://cdn.example.com/a.js"></script>
-      </head></html>`;
+      </head></html>`,
+				},
+			};
 
-			const out = await plugin.transformIndexHtml(html, {
-				bundle: {},
-			} as any);
+			await plugin.generateBundle.handler({}, bundle);
+			const out = String(bundle["index.html"].source);
 			// No integrity due to failure, script remains unchanged
 			expect(out).toContain(
 				'<script src="https://cdn.example.com/a.js"></script>'
@@ -469,7 +421,7 @@ describe("vite-plugin-sri-gen", () => {
 					source: cssBytes,
 				},
 			};
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 			// This test ensures binary source handling works without throwing errors
 		});
 
@@ -490,7 +442,7 @@ describe("vite-plugin-sri-gen", () => {
 					source: "console.log('ok')",
 				},
 			};
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 		});
 	});
 
@@ -522,7 +474,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			// Should inject rel=modulepreload with base-prefixed href, integrity and crossorigin
@@ -553,7 +505,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			// Only one occurrence expected
@@ -592,7 +544,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			expect(out).not.toContain(
@@ -654,7 +606,7 @@ describe("vite-plugin-sri-gen", () => {
 				[dyn.fileName]: dyn,
 			} as any;
 
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/base\/assets\/chunk-by-name\.js" integrity="sha256-/
@@ -680,7 +632,7 @@ describe("vite-plugin-sri-gen", () => {
 					"src/chunkA.ts"
 				),
 			} as any;
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/assets\/chunk-A\.js" integrity="sha256-[^"]+">/
@@ -714,7 +666,7 @@ describe("vite-plugin-sri-gen", () => {
 				[entry.fileName]: entry,
 				[dyn.fileName]: dyn,
 			} as any;
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/base\/assets\/chunk-by-name\.js" integrity="sha256-/
@@ -735,7 +687,7 @@ describe("vite-plugin-sri-gen", () => {
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
 			// Build SRI map by running generateBundle on a bundle with one JS asset
 			const bundle = makeBundle("assets/chunk-A.js", "console.log('A')");
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('x')", {
 				isEntry: true,
@@ -757,7 +709,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("sets integrity but omits crossorigin when not configured", async () => {
 			const plugin = sri() as any; // no crossorigin option
 			const bundle = makeBundle("assets/chunk-B.js", "console.log('B')");
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('y')", {
 				isEntry: true,
@@ -776,7 +728,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("sets integrity for scripts via setAttribute path", async () => {
 			const plugin = sri() as any;
 			const bundle = makeBundle("assets/mod.js", "export{};");
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const result = plugin.renderChunk("console.log('z')", {
 				isEntry: true,
 			} as any);
@@ -794,7 +746,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
 			const bundle = makeBundle("assets/ins.js", "export{};");
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 			const result = plugin.renderChunk("console.log('i')", {
 				isEntry: true,
 			} as any);
@@ -996,7 +948,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			// Should throw the error after handling it
 			await expect(
-				plugin.writeBundle.call(mockContext, {}, bundle)
+				plugin.generateBundle.handler.call(mockContext, {}, bundle)
 			).rejects.toThrow("Simulated integrity mapping error");
 
 			// Restore the spy
@@ -1024,7 +976,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// Should call console.error for the error message and error object in development
 			expect(spies.error).toHaveBeenCalledWith(
@@ -1052,7 +1004,7 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Call with plugin context that has an error method
-			await plugin.writeBundle.call(mockContext, {}, bundle);
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
 
 			// The plugin error method should be called for HTML processing errors
 			// (Error is caught at HTML processor level, so just verify plugin context exists)
@@ -1075,7 +1027,7 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Call without plugin context to use console fallback
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			expect(spies.error).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to process HTML file"),
@@ -1104,7 +1056,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// Should log all info messages including completion
 			expect(spies.info).toHaveBeenCalledWith(
@@ -1136,7 +1088,7 @@ describe("vite-plugin-sri-gen", () => {
 			// Should throw and call handleGenerateBundleError
 			// This test primarily covers the validation path, not actual error throwing.
 			// The bundle with null code will be handled gracefully (skipped), not thrown.
-			const result = await plugin.writeBundle({}, bundle);
+			const result = await plugin.generateBundle.handler({}, bundle);
 			expect(result).toBeUndefined();
 		});
 
@@ -1158,7 +1110,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// In production, info is still logged by the BundleLogger implementation
 			expect(spies.info).toHaveBeenCalled();
@@ -1171,7 +1123,7 @@ describe("vite-plugin-sri-gen", () => {
 			const { spies, cleanup } = spyOnConsole();
 			const plugin = sri() as any;
 
-			await plugin.writeBundle({}, {});
+			await plugin.generateBundle.handler({}, {});
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Empty bundle detected")
@@ -1185,14 +1137,14 @@ describe("vite-plugin-sri-gen", () => {
 			const plugin = sri() as any;
 
 			// Test with null bundle
-			await plugin.writeBundle({}, null);
+			await plugin.generateBundle.handler({}, null);
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Invalid bundle provided")
 			);
 
 			// Test with non-object bundle
-			await plugin.writeBundle({}, "not-an-object");
+			await plugin.generateBundle.handler({}, "not-an-object");
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Invalid bundle provided")
@@ -1232,7 +1184,7 @@ describe("vite-plugin-sri-gen", () => {
 				// Note: missing the actual "missing-chunk.js" file to trigger the warning
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// Should warn about unresolved dynamic import (different path hit)
 			expect(spies.warn).toHaveBeenCalledWith(
@@ -1379,7 +1331,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("handles error in maybeSetIntegrity during node insertion", async () => {
 			const plugin = sri() as any;
 			const bundle = makeBundle("assets/error.js", "export default 42;");
-			await plugin.writeBundle({}, bundle as any);
+			await plugin.generateBundle.handler({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('test')", {
 				isEntry: true,
@@ -1625,21 +1577,23 @@ describe("vite-plugin-sri-gen", () => {
 			const sriPlugin = sri({
 				algorithm: "sha256",
 				skipResources: ["analytics", "*/vendor-*"],
-			});
+			}) as any;
 
 			// Test HTML with both skipped and non-skipped resources
-			const html = `
-				<html>
-					<head>
-						<script id="analytics" src="/analytics.js"></script>
-						<script src="/main.js"></script>
-						<link rel="stylesheet" href="/vendor-styles.css" />
-						<link rel="stylesheet" href="/app.css" />
-					</head>
-				</html>
-			`;
-
-			const bundle = {
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `
+						<html>
+							<head>
+								<script id="analytics" src="/analytics.js"></script>
+								<script src="/main.js"></script>
+								<link rel="stylesheet" href="/vendor-styles.css" />
+								<link rel="stylesheet" href="/app.css" />
+							</head>
+						</html>
+					`,
+				},
 				"analytics.js": {
 					type: "chunk" as const,
 					code: "console.log('analytics')",
@@ -1662,16 +1616,19 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			const result = await sriPlugin.transformIndexHtml(html, { bundle });
+			await sriPlugin.generateBundle.handler({}, bundle);
+			const result = String(bundle["index.html"].source);
 
 			// Should have integrity for main.js and app.css only
 			expect(result).toContain('src="/main.js" integrity="sha256-');
 			expect(result).toContain('href="/app.css" integrity="sha256-');
-			
+
 			// Should NOT have integrity for analytics.js and vendor-styles.css
 			expect(result).not.toContain('src="/analytics.js" integrity=');
-			expect(result).not.toContain('href="/vendor-styles.css" integrity=');
-			
+			expect(result).not.toContain(
+				'href="/vendor-styles.css" integrity='
+			);
+
 			// But the elements should still be present
 			expect(result).toContain('src="/analytics.js"');
 			expect(result).toContain('href="/vendor-styles.css"');
@@ -1696,10 +1653,14 @@ describe("vite-plugin-sri-gen", () => {
 			// Test with dependencies injection
 			const dependencies = createTestDependencies();
 			expect(() => {
-				installSriRuntimeWithDeps(sriByPathname, {
-					crossorigin: "anonymous",
-					skipResources: ["*analytics*", "*vendor*"],
-				}, dependencies);
+				installSriRuntimeWithDeps(
+					sriByPathname,
+					{
+						crossorigin: "anonymous",
+						skipResources: ["*analytics*", "*vendor*"],
+					},
+					dependencies
+				);
 			}).not.toThrow();
 		});
 	});

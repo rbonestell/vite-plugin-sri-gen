@@ -21,9 +21,13 @@ import {
 	shouldSkipElement,
 	validateGenerateBundleInputs,
 } from "../src/internal";
-import { createMockBundleLogger, createMockPluginContext, mockBundle, spyOnConsole } from "./mocks/bundle-logger";
+import {
+	createMockBundleLogger,
+	createMockPluginContext,
+	mockBundle,
+	spyOnConsole,
+} from "./mocks/bundle-logger";
 import { autoSetupConsoleMock } from "./mocks/logger-mock";
-
 
 // Auto-setup console mocking for all tests
 autoSetupConsoleMock();
@@ -69,7 +73,9 @@ describe("Internal Utility Functions", () => {
 		it("computes sha256 integrity", () => {
 			const result = computeIntegrity("hello", "sha256");
 			expect(result).toMatch(/^sha256-[A-Za-z0-9+/]+=*$/);
-			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+			expect(result).toBe(
+				"sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+			);
 		});
 
 		it("computes sha384 integrity", () => {
@@ -86,18 +92,24 @@ describe("Internal Utility Functions", () => {
 			const bytes = new Uint8Array([104, 101, 108, 108, 111]); // "hello"
 			const result = computeIntegrity(bytes, "sha256");
 			expect(result).toMatch(/^sha256-[A-Za-z0-9+/]+=*$/);
-			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+			expect(result).toBe(
+				"sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+			);
 		});
 
 		it("handles Buffer input", () => {
 			const buffer = Buffer.from("hello", "utf8");
 			const result = computeIntegrity(buffer, "sha256");
-			expect(result).toBe("sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+			expect(result).toBe(
+				"sha256-LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+			);
 		});
 
 		it("handles empty input", () => {
 			const result = computeIntegrity("", "sha256");
-			expect(result).toBe("sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
+			expect(result).toBe(
+				"sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+			);
 		});
 
 		it("produces consistent results for same input", () => {
@@ -117,30 +129,40 @@ describe("Internal Utility Functions", () => {
 			const mockResponse = {
 				ok: true,
 				status: 200,
-				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
 			};
 			mockFetch.mockResolvedValue(mockResponse);
 
-			const result = await loadResource("http://example.com/resource.css", {});
+			const result = await loadResource(
+				"http://example.com/resource.css",
+				{}
+			);
 			expect(result).toBeInstanceOf(Uint8Array);
-			expect(mockFetch).toHaveBeenCalledWith("http://example.com/resource.css", undefined);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"http://example.com/resource.css",
+				undefined
+			);
 		});
 
 		it("handles fetch errors by throwing", async () => {
 			mockFetch.mockRejectedValue(new Error("Network error"));
 
-			await expect(loadResource("http://example.com/resource.css", {})).rejects.toThrow("Network error");
+			await expect(
+				loadResource("http://example.com/resource.css", {})
+			).rejects.toThrow("Network error");
 		});
 
 		it("handles non-ok HTTP responses by throwing", async () => {
 			const mockResponse = {
 				ok: false,
 				status: 404,
-				statusText: "Not Found"
+				statusText: "Not Found",
 			};
 			mockFetch.mockResolvedValue(mockResponse);
 
-			await expect(loadResource("http://example.com/resource.css", {})).rejects.toThrow("Failed to fetch");
+			await expect(
+				loadResource("http://example.com/resource.css", {})
+			).rejects.toThrow("Failed to fetch");
 		});
 
 		it("uses cache for repeated requests", async () => {
@@ -148,7 +170,11 @@ describe("Internal Utility Functions", () => {
 			const cachedData = new Uint8Array([1, 2, 3]);
 			cache.set("http://example.com/cached.css", cachedData);
 
-			const result = await loadResource("http://example.com/cached.css", {}, { cache });
+			const result = await loadResource(
+				"http://example.com/cached.css",
+				{},
+				{ cache }
+			);
 			expect(result).toBe(cachedData);
 			expect(mockFetch).not.toHaveBeenCalled();
 		});
@@ -185,31 +211,40 @@ describe("Internal Utility Functions", () => {
 			const mockResponse = {
 				ok: true,
 				status: 200,
-				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+				arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
 			};
 			mockFetch.mockResolvedValue(mockResponse);
 
 			await loadResource("//example.com/resource.css", {});
-			expect(mockFetch).toHaveBeenCalledWith("https://example.com/resource.css", undefined);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://example.com/resource.css",
+				undefined
+			);
 		});
 	});
 
 	// Helper function to create a test element
-	function createTestElement(nodeName: string, attrs: { name: string; value: string }[]): Element {
+	function createTestElement(
+		nodeName: string,
+		attrs: { name: string; value: string }[]
+	): Element {
 		return {
 			nodeName,
 			tagName: nodeName,
-			attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
+			attrs: attrs.map((attr) => ({
+				name: attr.name,
+				value: attr.value,
+			})),
 			namespaceURI: "http://www.w3.org/1999/xhtml",
 			childNodes: [],
 			parentNode: null,
-			sourceCodeLocation: undefined
+			sourceCodeLocation: undefined,
 		};
 	}
 
 	// Helper function to get attribute value from element
 	function getAttrValue(element: Element, name: string): string | undefined {
-		const attr = element.attrs.find(a => a.name === name);
+		const attr = element.attrs.find((a) => a.name === name);
 		return attr?.value;
 	}
 
@@ -218,7 +253,7 @@ describe("Internal Utility Functions", () => {
 			const scriptEl = createTestElement("script", []);
 			const linkEl = createTestElement("link", []);
 			const divEl = createTestElement("div", []);
-			
+
 			expect(getUrlAttrName(scriptEl)).toBe("src");
 			expect(getUrlAttrName(linkEl)).toBe("href");
 			expect(getUrlAttrName(divEl)).toBe("href"); // defaults to href for unknown elements
@@ -337,7 +372,9 @@ describe("Internal Utility Functions", () => {
 
 	describe("processElement", () => {
 		it("adds integrity to script elements", async () => {
-			const element = createTestElement("script", [{ name: "src", value: "/foo.js" }]);
+			const element = createTestElement("script", [
+				{ name: "src", value: "/foo.js" },
+			]);
 			const bundle = mockBundle({ "foo.js": "console.log('test')" });
 
 			await processElement(element, bundle, "sha256");
@@ -348,7 +385,7 @@ describe("Internal Utility Functions", () => {
 		it("adds integrity to link elements", async () => {
 			const element = createTestElement("link", [
 				{ name: "rel", value: "stylesheet" },
-				{ name: "href", value: "/style.css" }
+				{ name: "href", value: "/style.css" },
 			]);
 			const bundle = mockBundle({ "style.css": "body{}" });
 
@@ -358,20 +395,23 @@ describe("Internal Utility Functions", () => {
 			expect(getAttrValue(element, "crossorigin")).toBe("anonymous");
 		});
 
-		it("skips elements with existing integrity", async () => {
+		it("overwrites elements with existing integrity", async () => {
 			const element = createTestElement("script", [
 				{ name: "src", value: "/foo.js" },
-				{ name: "integrity", value: "existing" }
+				{ name: "integrity", value: "existing" },
 			]);
 			const bundle = mockBundle({ "foo.js": "console.log('test')" });
 
 			await processElement(element, bundle, "sha256");
 
-			expect(getAttrValue(element, "integrity")).toBe("existing");
+			// Should calculate fresh integrity, not preserve existing
+			expect(getAttrValue(element, "integrity")).toMatch(/^sha256-/);
 		});
 
 		it("handles missing resources gracefully", async () => {
-			const element = createTestElement("script", [{ name: "src", value: "/missing.js" }]);
+			const element = createTestElement("script", [
+				{ name: "src", value: "/missing.js" },
+			]);
 			const bundle = mockBundle({});
 
 			await processElement(element, bundle, "sha256");
@@ -404,7 +444,8 @@ describe("Internal Utility Functions", () => {
 		it("handles processing errors gracefully", async () => {
 			const mockLogger = createMockBundleLogger();
 
-			const html = '<!DOCTYPE html><html><body><script src="http://invalid-url"></script></body></html>';
+			const html =
+				'<!DOCTYPE html><html><body><script src="http://invalid-url"></script></body></html>';
 			mockFetch.mockRejectedValue(new Error("Network error"));
 
 			const result = await addSriToHtml(html, {}, mockLogger, {
@@ -416,7 +457,8 @@ describe("Internal Utility Functions", () => {
 		});
 
 		it("adds crossorigin when specified", async () => {
-			const html = '<!DOCTYPE html><html><body><script src="/script.js"></script></body></html>';
+			const html =
+				'<!DOCTYPE html><html><body><script src="/script.js"></script></body></html>';
 			const bundle = mockBundle({ "script.js": "console.log('script')" });
 
 			const result = await addSriToHtml(html, bundle, console, {
@@ -630,7 +672,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should process without throwing
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// Check that HTML was processed
 			const processedHtml = String(bundle["index.html"].source);
@@ -659,7 +701,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should handle gracefully without throwing
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 		});
 
 		it("handles integrity computation errors", async () => {
@@ -686,7 +728,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should handle any errors gracefully
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			cleanup();
 		});
@@ -716,7 +758,7 @@ describe("Processing Classes", () => {
 				};
 			}
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 		});
 
 		it("builds integrity mappings directly", async () => {
@@ -835,7 +877,7 @@ describe("Processing Classes", () => {
 				},
 			};
 
-			await plugin.writeBundle({}, bundle);
+			await plugin.generateBundle.handler({}, bundle);
 
 			// Check that HTML includes preload links for dynamic chunks
 			const processedHtml = String(bundle["index.html"].source);
@@ -1227,7 +1269,7 @@ describe("Processing Classes", () => {
 		// See installSriRuntimeWithDeps and the DOM abstraction layer for cleaner testing.
 		it("covers childNodes initialization in addPreloadLink", async () => {
 			const mockLogger = createMockBundleLogger();
-			
+
 			const config = {
 				algorithm: "sha256" as const,
 				base: "/",
@@ -1239,10 +1281,11 @@ describe("Processing Classes", () => {
 			};
 
 			const processor = new HtmlProcessor(config);
-			
+
 			// Create HTML to test the initialization path
-			const html = '<!DOCTYPE html><html><head></head><body></body></html>';
-			
+			const html =
+				"<!DOCTYPE html><html><head></head><body></body></html>";
+
 			const bundle: any = {
 				"index.html": { type: "asset", source: html },
 			};
@@ -1250,30 +1293,49 @@ describe("Processing Classes", () => {
 			const dynamicChunkFiles = new Set(["chunk.js"]);
 
 			// Mock the private method to manipulate the DOM structure
-			const originalAddDynamicChunkPreloads = (processor as any).addDynamicChunkPreloads;
-			(processor as any).addDynamicChunkPreloads = function(htmlContent: string, dynamicChunkFiles: Set<string>, sriByPathname: Record<string, string>) {
+			const originalAddDynamicChunkPreloads = (processor as any)
+				.addDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads = function (
+				htmlContent: string,
+				dynamicChunkFiles: Set<string>,
+				sriByPathname: Record<string, string>
+			) {
 				const dom = parse5.parse(htmlContent) as any;
-				const html = dom.childNodes.find((node: any) => node.nodeName === 'html');
-				const head = html?.childNodes.find((node: any) => node.nodeName === 'head');
-				
+				const html = dom.childNodes.find(
+					(node: any) => node.nodeName === "html"
+				);
+				const head = html?.childNodes.find(
+					(node: any) => node.nodeName === "head"
+				);
+
 				if (head) {
 					// Set childNodes to undefined to trigger the initialization
 					head.childNodes = undefined;
 				}
-				
-				return originalAddDynamicChunkPreloads.call(this, htmlContent, dynamicChunkFiles, sriByPathname);
+
+				return originalAddDynamicChunkPreloads.call(
+					this,
+					htmlContent,
+					dynamicChunkFiles,
+					sriByPathname
+				);
 			};
 
 			// This should initialize head.childNodes = [] and add the preload link
-			await processor.processHtmlFiles(bundle, sriByPathname, dynamicChunkFiles);
-			
+			await processor.processHtmlFiles(
+				bundle,
+				sriByPathname,
+				dynamicChunkFiles
+			);
+
 			// Restore original method
-			(processor as any).addDynamicChunkPreloads = originalAddDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads =
+				originalAddDynamicChunkPreloads;
 		});
 
 		it("covers error handling in addDynamicChunkPreloads", async () => {
 			const mockLogger = createMockBundleLogger();
-			
+
 			const config = {
 				algorithm: "sha256" as const,
 				base: "/",
@@ -1285,9 +1347,10 @@ describe("Processing Classes", () => {
 			};
 
 			const processor = new HtmlProcessor(config);
-			
+
 			// Create HTML
-			const html = '<!DOCTYPE html><html><head></head><body></body></html>';
+			const html =
+				"<!DOCTYPE html><html><head></head><body></body></html>";
 
 			const bundle: any = {
 				"index.html": { type: "asset", source: html },
@@ -1296,21 +1359,27 @@ describe("Processing Classes", () => {
 			const dynamicChunkFiles = new Set(["chunk.js"]);
 
 			// Mock the private method to throw an error
-			const originalAddDynamicChunkPreloads = (processor as any).addDynamicChunkPreloads;
-			(processor as any).addDynamicChunkPreloads = function() {
+			const originalAddDynamicChunkPreloads = (processor as any)
+				.addDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads = function () {
 				throw new Error("Parse error to test error handling");
 			};
 
 			// This should trigger error handling and fall back gracefully with original HTML
-			await processor.processHtmlFiles(bundle, sriByPathname, dynamicChunkFiles);
+			await processor.processHtmlFiles(
+				bundle,
+				sriByPathname,
+				dynamicChunkFiles
+			);
 
 			expect(mockLogger.error).toHaveBeenCalledWith(
 				expect.stringContaining("Parse error to test error handling"),
 				expect.any(Error)
 			);
-			
+
 			// Restore original method
-			(processor as any).addDynamicChunkPreloads = originalAddDynamicChunkPreloads;
+			(processor as any).addDynamicChunkPreloads =
+				originalAddDynamicChunkPreloads;
 		});
 
 		it("covers error handling in maybeSetIntegrity", () => {
@@ -1320,7 +1389,8 @@ describe("Processing Classes", () => {
 			 */
 			const originalElement = (globalThis as any).Element;
 			const originalHTMLLinkElement = (globalThis as any).HTMLLinkElement;
-			const originalHTMLScriptElement = (globalThis as any).HTMLScriptElement;
+			const originalHTMLScriptElement = (globalThis as any)
+				.HTMLScriptElement;
 
 			try {
 				// Create minimal fake DOM with functions that will fail silently
@@ -1329,24 +1399,28 @@ describe("Processing Classes", () => {
 					setAttribute: function (name: string, value: string) {
 						if (name === "integrity" || name === "crossorigin") {
 							// This simulates setAttribute failure to test error handling
-							throw new Error("setAttribute failed for error testing");
+							throw new Error(
+								"setAttribute failed for error testing"
+							);
 						}
 						// For other attributes, simulate normal behavior
 						(this as any)[name] = value;
 					},
 				};
-				
-				(globalThis as any).HTMLLinkElement = function HTMLLinkElement() {
-					this.hasAttribute = (name: string) => false;
-					this.rel = "";
-				};
+
+				(globalThis as any).HTMLLinkElement =
+					function HTMLLinkElement() {
+						this.hasAttribute = (name: string) => false;
+						this.rel = "";
+					};
 				(globalThis as any).HTMLLinkElement.prototype = Object.create(
 					(globalThis as any).Element.prototype
 				);
-				
-				(globalThis as any).HTMLScriptElement = function HTMLScriptElement() {
-					this.hasAttribute = (name: string) => false;
-				};
+
+				(globalThis as any).HTMLScriptElement =
+					function HTMLScriptElement() {
+						this.hasAttribute = (name: string) => false;
+					};
 				(globalThis as any).HTMLScriptElement.prototype = Object.create(
 					(globalThis as any).Element.prototype
 				);
@@ -1355,7 +1429,7 @@ describe("Processing Classes", () => {
 				installSriRuntime({ "/test.js": "sha256-abc123" }, {});
 
 				const script = new (globalThis as any).HTMLScriptElement();
-				
+
 				// This should trigger the error in maybeSetIntegrity and handle it gracefully
 				// The error should be caught and not propagated
 				expect(() => {
@@ -1364,7 +1438,8 @@ describe("Processing Classes", () => {
 			} finally {
 				(globalThis as any).Element = originalElement;
 				(globalThis as any).HTMLLinkElement = originalHTMLLinkElement;
-				(globalThis as any).HTMLScriptElement = originalHTMLScriptElement;
+				(globalThis as any).HTMLScriptElement =
+					originalHTMLScriptElement;
 			}
 		});
 
@@ -1439,9 +1514,12 @@ describe("Processing Classes", () => {
 describe("Additional Edge Cases and Error Paths", () => {
 	describe("validateGenerateBundleInputs", () => {
 		it("validates valid non-empty bundle with HTML", () => {
-			const bundle = { 
+			const bundle = {
 				"test.js": { type: "chunk", code: "console.log('test')" },
-				"index.html": { type: "asset", source: "<html><head><script src='test.js'></script></head></html>" }
+				"index.html": {
+					type: "asset",
+					source: "<html><head><script src='test.js'></script></head></html>",
+				},
 			};
 			const result = validateGenerateBundleInputs(bundle, false);
 			expect(result.isValid).toBe(true);
@@ -1453,7 +1531,9 @@ describe("Additional Edge Cases and Error Paths", () => {
 			const result = validateGenerateBundleInputs(null as any, false);
 			expect(result.isValid).toBe(false);
 			expect(result.shouldWarn).toBe(true);
-			expect(result.message).toContain("Invalid bundle provided to generateBundle");
+			expect(result.message).toContain(
+				"Invalid bundle provided to generateBundle"
+			);
 		});
 
 		it("warns about empty bundle", () => {
@@ -1464,7 +1544,9 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("handles bundle without HTML files in non-SSR mode", () => {
-			const bundle = { "test.js": { type: "chunk", code: "console.log('test')" } };
+			const bundle = {
+				"test.js": { type: "chunk", code: "console.log('test')" },
+			};
 			const result = validateGenerateBundleInputs(bundle, false);
 			expect(result.isValid).toBe(false);
 			expect(result.shouldWarn).toBe(false); // Non-SSR without HTML is silently skipped
@@ -1472,18 +1554,27 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("handles bundle without HTML files in SSR mode", () => {
-			const bundle = { "test.js": { type: "chunk", code: "console.log('test')" } };
+			const bundle = {
+				"test.js": { type: "chunk", code: "console.log('test')" },
+			};
 			const result = validateGenerateBundleInputs(bundle, true);
 			expect(result.isValid).toBe(false);
 			expect(result.shouldWarn).toBe(true);
-			expect(result.message).toContain("No emitted HTML detected during SSR build");
+			expect(result.message).toContain(
+				"No emitted HTML detected during SSR build"
+			);
 		});
 
 		it("handles non-object bundle", () => {
-			const result = validateGenerateBundleInputs("invalid" as any, false);
+			const result = validateGenerateBundleInputs(
+				"invalid" as any,
+				false
+			);
 			expect(result.isValid).toBe(false);
 			expect(result.shouldWarn).toBe(true);
-			expect(result.message).toContain("Invalid bundle provided to generateBundle");
+			expect(result.message).toContain(
+				"Invalid bundle provided to generateBundle"
+			);
 		});
 	});
 
@@ -1491,35 +1582,47 @@ describe("Additional Edge Cases and Error Paths", () => {
 		it("logs error with stack trace", () => {
 			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 			const error = new Error("Test error");
-			
+
 			handleGenerateBundleError(error, mockLogger);
-			
-			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: Test error", error);
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Critical error during SRI generation: Test error",
+				error
+			);
 		});
 
 		it("logs error without stack trace", () => {
 			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 			const errorLike = { message: "Test error" };
-			
+
 			handleGenerateBundleError(errorLike, mockLogger);
-			
-			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: [object Object]", undefined);
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Critical error during SRI generation: [object Object]",
+				undefined
+			);
 		});
 
 		it("handles string errors", () => {
 			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-			
+
 			handleGenerateBundleError("String error", mockLogger);
-			
-			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: String error", undefined);
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Critical error during SRI generation: String error",
+				undefined
+			);
 		});
 
 		it("handles null/undefined errors", () => {
 			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-			
+
 			handleGenerateBundleError(null, mockLogger);
-			
-			expect(mockLogger.error).toHaveBeenCalledWith("Critical error during SRI generation: null", undefined);
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Critical error during SRI generation: null",
+				undefined
+			);
 		});
 	});
 
@@ -1528,35 +1631,46 @@ describe("Additional Edge Cases and Error Paths", () => {
 			const mockContext = {
 				info: vi.fn(),
 				warn: vi.fn(),
-				error: vi.fn()
+				error: vi.fn(),
 			};
-			
+
 			const logger = createLogger(mockContext);
-			
+
 			logger.info("test info");
 			logger.warn("test warn");
 			logger.error("test error");
-			
+
 			expect(mockContext.info).toHaveBeenCalledWith("test info");
 			expect(mockContext.warn).toHaveBeenCalledWith("test warn");
 			expect(mockContext.error).toHaveBeenCalledWith("test error");
 		});
 
 		it("falls back to console when no plugin context", () => {
-			const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-			const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-			
+			const consoleSpy = vi
+				.spyOn(console, "info")
+				.mockImplementation(() => {});
+			const warnSpy = vi
+				.spyOn(console, "warn")
+				.mockImplementation(() => {});
+			const errorSpy = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => {});
+
 			try {
 				const logger = createLogger(null);
-				
+
 				logger.info("test info");
 				logger.warn("test warn");
 				logger.error("test error");
-				
+
 				// Logger adds [vite-plugin-sri-gen] prefix
-				expect(warnSpy).toHaveBeenCalledWith("[vite-plugin-sri-gen] test warn");
-				expect(errorSpy).toHaveBeenCalledWith("[vite-plugin-sri-gen] test error", undefined);
+				expect(warnSpy).toHaveBeenCalledWith(
+					"[vite-plugin-sri-gen] test warn"
+				);
+				expect(errorSpy).toHaveBeenCalledWith(
+					"[vite-plugin-sri-gen] test error",
+					undefined
+				);
 			} finally {
 				consoleSpy.mockRestore();
 				warnSpy.mockRestore();
@@ -1566,7 +1680,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 		it("handles missing plugin context gracefully", () => {
 			const logger = createLogger(undefined);
-			
+
 			// Should not throw when plugin context is undefined
 			expect(() => {
 				logger.info("test");
@@ -1588,9 +1702,13 @@ describe("Additional Edge Cases and Error Paths", () => {
 		it("handles malformed HTML gracefully", async () => {
 			const malformedHtml = "<html><head><script src='/test.js'><body>"; // Missing closing tags
 			const bundle = mockBundle({ "test.js": "console.log('test')" });
-			
-			const result = await addSriToHtml(malformedHtml, bundle, mockLogger);
-			
+
+			const result = await addSriToHtml(
+				malformedHtml,
+				bundle,
+				mockLogger
+			);
+
 			// Should still process what it can
 			expect(result).toContain("integrity=");
 		});
@@ -1602,7 +1720,8 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("handles HTML with no eligible elements", async () => {
-			const html = "<html><head><title>Test</title></head><body><div>Content</div></body></html>";
+			const html =
+				"<html><head><title>Test</title></head><body><div>Content</div></body></html>";
 			const result = await addSriToHtml(html, {}, mockLogger);
 			expect(result).toBe(html);
 		});
@@ -1610,63 +1729,76 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 	describe("processElement edge cases", () => {
 		// Helper to find createTestElement function scope
-		function localCreateTestElement(nodeName: string, attrs: { name: string; value: string }[]): Element {
+		function localCreateTestElement(
+			nodeName: string,
+			attrs: { name: string; value: string }[]
+		): Element {
 			return {
 				nodeName,
 				tagName: nodeName,
-				attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
+				attrs: attrs.map((attr) => ({
+					name: attr.name,
+					value: attr.value,
+				})),
 				namespaceURI: "http://www.w3.org/1999/xhtml",
 				childNodes: [],
 				parentNode: null,
-				sourceCodeLocation: undefined
+				sourceCodeLocation: undefined,
 			};
 		}
 
 		// Helper function to get attribute value from element
-		function localGetAttrValue(element: Element, name: string): string | undefined {
-			const attr = element.attrs.find(a => a.name === name);
+		function localGetAttrValue(
+			element: Element,
+			name: string
+		): string | undefined {
+			const attr = element.attrs.find((a) => a.name === name);
 			return attr?.value;
 		}
 
 		it("handles element without URL attribute", async () => {
 			const element = localCreateTestElement("script", []); // No src attribute
 			const bundle = mockBundle({ "test.js": "console.log('test')" });
-			
+
 			await processElement(element, bundle, "sha256");
-			
+
 			// Should not add integrity when no URL
 			expect(localGetAttrValue(element, "integrity")).toBeUndefined();
 		});
 
-		it("handles element with existing integrity", async () => {
+		it("overwrites element with existing integrity", async () => {
 			const element = localCreateTestElement("script", [
 				{ name: "src", value: "/test.js" },
-				{ name: "integrity", value: "existing-integrity" }
+				{ name: "integrity", value: "existing-integrity" },
 			]);
 			const bundle = mockBundle({ "test.js": "console.log('test')" });
-			
+
 			await processElement(element, bundle, "sha256");
-			
-			// Should preserve existing integrity
-			expect(localGetAttrValue(element, "integrity")).toBe("existing-integrity");
+
+			// Should calculate fresh integrity, not preserve existing
+			expect(localGetAttrValue(element, "integrity")).toMatch(/^sha256-/);
 		});
 
 		it("handles resource loading failure", async () => {
-			const element = localCreateTestElement("script", [{ name: "src", value: "/missing.js" }]);
+			const element = localCreateTestElement("script", [
+				{ name: "src", value: "/missing.js" },
+			]);
 			const bundle = mockBundle({ "test.js": "console.log('test')" }); // Different file
-			
+
 			await processElement(element, bundle, "sha256");
-			
+
 			// Should not add integrity when resource loading fails
 			expect(localGetAttrValue(element, "integrity")).toBeUndefined();
 		});
 
 		it("handles empty resource content", async () => {
-			const element = localCreateTestElement("script", [{ name: "src", value: "/empty.js" }]);
+			const element = localCreateTestElement("script", [
+				{ name: "src", value: "/empty.js" },
+			]);
 			const bundle = mockBundle({ "empty.js": "" }); // Empty content
-			
+
 			await processElement(element, bundle, "sha256");
-			
+
 			// Should handle empty content gracefully
 			const integrity = localGetAttrValue(element, "integrity");
 			if (integrity) {
@@ -1690,9 +1822,10 @@ describe("Additional Edge Cases and Error Paths", () => {
 		it("handles bundle with circular references", async () => {
 			const circularBundle: any = {};
 			circularBundle.self = circularBundle; // Create circular reference
-			
-			const html = "<html><head><script src='/test.js'></script></head></html>";
-			
+
+			const html =
+				"<html><head><script src='/test.js'></script></head></html>";
+
 			// Should not throw on circular references
 			expect(async () => {
 				await addSriToHtml(html, circularBundle, mockLogger);
@@ -1703,12 +1836,13 @@ describe("Additional Edge Cases and Error Paths", () => {
 			const bundle = {
 				"test.js": {
 					type: "chunk",
-					source: 123 // Non-string source
-				}
+					source: 123, // Non-string source
+				},
 			};
-			
-			const html = "<html><head><script src='/test.js'></script></head></html>";
-			
+
+			const html =
+				"<html><head><script src='/test.js'></script></head></html>";
+
 			// Should handle non-string content gracefully
 			expect(async () => {
 				await addSriToHtml(html, bundle, mockLogger);
@@ -1717,20 +1851,23 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 		it("handles extremely large HTML documents", async () => {
 			// Create large HTML with many script tags
-			const scripts = Array(100).fill(0).map((_, i) => 
-				`<script src='/test${i}.js'></script>`
-			).join('');
+			const scripts = Array(100)
+				.fill(0)
+				.map((_, i) => `<script src='/test${i}.js'></script>`)
+				.join("");
 			const html = `<html><head>${scripts}</head></html>`;
-			
+
 			const bundle = mockBundle(
 				Object.fromEntries(
-					Array(100).fill(0).map((_, i) => [`test${i}.js`, `console.log(${i})`])
+					Array(100)
+						.fill(0)
+						.map((_, i) => [`test${i}.js`, `console.log(${i})`])
 				)
 			);
-			
+
 			// Should handle large documents without issues
 			const result = await addSriToHtml(html, bundle, mockLogger);
-			
+
 			// Verify all scripts got integrity attributes
 			const integrityCount = (result.match(/integrity=/g) || []).length;
 			expect(integrityCount).toBe(100);
@@ -1752,10 +1889,21 @@ describe("Additional Edge Cases and Error Paths", () => {
 			});
 
 			it("handles complex patterns", () => {
-				expect(matchesPattern("*analytics*", "google-analytics-v1.js")).toBe(true);
-				expect(matchesPattern("*.googleapis.com/*", "fonts.googleapis.com/style.css")).toBe(true);
-				expect(matchesPattern("lib-*.min.js", "lib-jquery.min.js")).toBe(true);
-				expect(matchesPattern("lib-*.min.js", "lib-jquery.js")).toBe(false);
+				expect(
+					matchesPattern("*analytics*", "google-analytics-v1.js")
+				).toBe(true);
+				expect(
+					matchesPattern(
+						"*.googleapis.com/*",
+						"fonts.googleapis.com/style.css"
+					)
+				).toBe(true);
+				expect(
+					matchesPattern("lib-*.min.js", "lib-jquery.min.js")
+				).toBe(true);
+				expect(matchesPattern("lib-*.min.js", "lib-jquery.js")).toBe(
+					false
+				);
 			});
 
 			it("handles edge cases", () => {
@@ -1774,45 +1922,74 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		describe("shouldSkipElement", () => {
-			const createMockElement = (attrs: Record<string, string>): Element => {
+			const createMockElement = (
+				attrs: Record<string, string>
+			): Element => {
 				return {
 					nodeName: "script",
-					attrs: Object.entries(attrs).map(([name, value]) => ({ name, value })),
+					attrs: Object.entries(attrs).map(([name, value]) => ({
+						name,
+						value,
+					})),
 				} as Element;
 			};
 
 			it("returns false when no skip patterns provided", () => {
 				const element = createMockElement({ src: "test.js" });
 				expect(shouldSkipElement(element, [])).toBe(false);
-				expect(shouldSkipElement(element, undefined as any)).toBe(false);
+				expect(shouldSkipElement(element, undefined as any)).toBe(
+					false
+				);
 			});
 
 			it("skips elements by ID", () => {
-				const element = createMockElement({ id: "analytics-script", src: "test.js" });
+				const element = createMockElement({
+					id: "analytics-script",
+					src: "test.js",
+				});
 				expect(shouldSkipElement(element, ["analytics-*"])).toBe(true);
 				expect(shouldSkipElement(element, ["different-*"])).toBe(false);
 			});
 
 			it("skips elements by src attribute", () => {
-				const element = createMockElement({ src: "google-analytics.js" });
+				const element = createMockElement({
+					src: "google-analytics.js",
+				});
 				expect(shouldSkipElement(element, ["*analytics*"])).toBe(true);
-				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(false);
+				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(
+					false
+				);
 			});
 
 			it("skips elements by href attribute", () => {
-				const element = createMockElement({ href: "fonts.googleapis.com/css" });
-				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(true);
+				const element = createMockElement({
+					href: "fonts.googleapis.com/css",
+				});
+				expect(shouldSkipElement(element, ["*.googleapis.com/*"])).toBe(
+					true
+				);
 				expect(shouldSkipElement(element, ["*analytics*"])).toBe(false);
 			});
 
 			it("matches multiple patterns", () => {
 				const element = createMockElement({ src: "vendor-react.js" });
-				expect(shouldSkipElement(element, ["*analytics*", "vendor-*", "*.min.js"])).toBe(true);
+				expect(
+					shouldSkipElement(element, [
+						"*analytics*",
+						"vendor-*",
+						"*.min.js",
+					])
+				).toBe(true);
 			});
 
 			it("returns false when no attributes match", () => {
-				const element = createMockElement({ src: "custom.js", id: "main-script" });
-				expect(shouldSkipElement(element, ["*analytics*", "vendor-*"])).toBe(false);
+				const element = createMockElement({
+					src: "custom.js",
+					id: "main-script",
+				});
+				expect(
+					shouldSkipElement(element, ["*analytics*", "vendor-*"])
+				).toBe(false);
 			});
 		});
 
@@ -1844,11 +2021,11 @@ describe("Additional Edge Cases and Error Paths", () => {
 				// Should have integrity for main.js and main.css only
 				expect(result).toContain('src="/main.js" integrity=');
 				expect(result).toContain('href="/main.css" integrity=');
-				
+
 				// Should NOT have integrity for analytics.js and vendor.css
 				expect(result).not.toContain('src="/analytics.js" integrity=');
 				expect(result).not.toContain('href="/vendor.css" integrity=');
-				
+
 				// But the elements should still be present
 				expect(result).toContain('src="/analytics.js"');
 				expect(result).toContain('href="/vendor.css"');
@@ -1863,15 +2040,21 @@ describe("Additional Edge Cases and Error Paths", () => {
 					skipResources: [],
 				});
 
-				expect(result).toContain('integrity=');
+				expect(result).toContain("integrity=");
 			});
 		});
 
 		describe("Advanced Pattern Matching Tests", () => {
 			it("handles real-world tracking and analytics patterns", () => {
 				const trackingPatterns = [
-					"*analytics*", "*googletagmanager*", "*facebook*", "*google-analytics*", 
-					"*hotjar*", "*mixpanel*", "*segment*", "*amplitude*"
+					"*analytics*",
+					"*googletagmanager*",
+					"*facebook*",
+					"*google-analytics*",
+					"*hotjar*",
+					"*mixpanel*",
+					"*segment*",
+					"*amplitude*",
 				];
 
 				const testUrls = [
@@ -1881,19 +2064,27 @@ describe("Additional Edge Cases and Error Paths", () => {
 					"https://cdn.segment.com/analytics.js/v1/abc123/analytics.min.js",
 					"https://cdn.amplitude.com/libs/amplitude-8.17.0-min.gz.js",
 					"https://api.mixpanel.com/track/",
-					"https://www.google-analytics.com/analytics.js"
+					"https://www.google-analytics.com/analytics.js",
 				];
 
 				testUrls.forEach((url, index) => {
-					const matchingPattern = trackingPatterns.find(pattern => matchesPattern(pattern, url));
-					expect(matchingPattern, `URL ${index} (${url}) should match at least one pattern`).toBeDefined();
+					const matchingPattern = trackingPatterns.find((pattern) =>
+						matchesPattern(pattern, url)
+					);
+					expect(
+						matchingPattern,
+						`URL ${index} (${url}) should match at least one pattern`
+					).toBeDefined();
 				});
 			});
 
 			it("handles CDN and external library patterns", () => {
 				const cdnPatterns = [
-					"*.googleapis.com/*", "*unpkg.com/*", "*.jsdelivr.net/*",
-					"*.cloudflare.com/*", "*.bootstrapcdn.com/*"
+					"*.googleapis.com/*",
+					"*unpkg.com/*",
+					"*.jsdelivr.net/*",
+					"*.cloudflare.com/*",
+					"*.bootstrapcdn.com/*",
 				];
 
 				const testUrls = [
@@ -1901,42 +2092,72 @@ describe("Additional Edge Cases and Error Paths", () => {
 					"https://unpkg.com/vue@3/dist/vue.global.prod.js",
 					"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css",
 					"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js",
-					"https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+					"https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css",
 				];
 
-				testUrls.forEach(url => {
-					expect(cdnPatterns.some(pattern => matchesPattern(pattern, url))).toBe(true);
+				testUrls.forEach((url) => {
+					expect(
+						cdnPatterns.some((pattern) =>
+							matchesPattern(pattern, url)
+						)
+					).toBe(true);
 				});
 			});
 
 			it("handles versioned and hashed filenames", () => {
 				const versionPatterns = [
-					"*-v*.js", "*.min.*", "*.*.js", "*.*.css",
-					"vendor-*.js", "chunk-*.js"
+					"*-v*.js",
+					"*.min.*",
+					"*.*.js",
+					"*.*.css",
+					"vendor-*.js",
+					"chunk-*.js",
 				];
 
 				const testFiles = [
-					"jquery-v3.6.0.min.js",  // Matches "*-v*.js"
-					"bootstrap.min.css",     // Matches "*.min.*"
-					"app.abc123.js",         // Matches "*.*.js"
-					"styles.def456.css",     // Matches "*.*.css"
-					"vendor-libs.js",        // Matches "vendor-*.js"
-					"chunk-runtime.789xyz.js" // Matches "chunk-*.js"
+					"jquery-v3.6.0.min.js", // Matches "*-v*.js"
+					"bootstrap.min.css", // Matches "*.min.*"
+					"app.abc123.js", // Matches "*.*.js"
+					"styles.def456.css", // Matches "*.*.css"
+					"vendor-libs.js", // Matches "vendor-*.js"
+					"chunk-runtime.789xyz.js", // Matches "chunk-*.js"
 				];
 
-				testFiles.forEach(file => {
-					const matchingPattern = versionPatterns.find(pattern => matchesPattern(pattern, file));
+				testFiles.forEach((file) => {
+					const matchingPattern = versionPatterns.find((pattern) =>
+						matchesPattern(pattern, file)
+					);
 					expect(matchingPattern).toBeDefined();
 				});
 			});
 
 			it("handles Unicode and special characters in patterns", () => {
 				const unicodeTests = [
-					{ pattern: "*café*.js", test: "main-café-script.js", expected: true },
-					{ pattern: "*测试*.css", test: "app-测试-styles.css", expected: true },
-					{ pattern: "*🚀*.js", test: "rocket🚀app.js", expected: true },
-					{ pattern: "*%20*", test: "file%20with%20spaces.js", expected: true },
-					{ pattern: "*&*", test: "script&param=value.js", expected: true }
+					{
+						pattern: "*café*.js",
+						test: "main-café-script.js",
+						expected: true,
+					},
+					{
+						pattern: "*测试*.css",
+						test: "app-测试-styles.css",
+						expected: true,
+					},
+					{
+						pattern: "*🚀*.js",
+						test: "rocket🚀app.js",
+						expected: true,
+					},
+					{
+						pattern: "*%20*",
+						test: "file%20with%20spaces.js",
+						expected: true,
+					},
+					{
+						pattern: "*&*",
+						test: "script&param=value.js",
+						expected: true,
+					},
 				];
 
 				unicodeTests.forEach(({ pattern, test, expected }) => {
@@ -1948,8 +2169,16 @@ describe("Additional Edge Cases and Error Paths", () => {
 				const caseSensitiveTests = [
 					{ pattern: "*.JS", test: "script.js", expected: false },
 					{ pattern: "*.js", test: "script.JS", expected: false },
-					{ pattern: "*Analytics*", test: "google-analytics.js", expected: false },
-					{ pattern: "*analytics*", test: "Google-Analytics.js", expected: false }
+					{
+						pattern: "*Analytics*",
+						test: "google-analytics.js",
+						expected: false,
+					},
+					{
+						pattern: "*analytics*",
+						test: "Google-Analytics.js",
+						expected: false,
+					},
 				];
 
 				caseSensitiveTests.forEach(({ pattern, test, expected }) => {
@@ -1959,20 +2188,36 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		describe("isEligibleForSri with skip patterns - Integration Tests", () => {
-			const createMockElement = (nodeName: string, attrs: Record<string, string>): Element => ({
-				nodeName,
-				tagName: nodeName.toUpperCase(),
-				attrs: Object.entries(attrs).map(([name, value]) => ({ name, value })),
-				childNodes: [],
-				parentNode: null,
-				namespaceURI: "http://www.w3.org/1999/xhtml",
-				sourceCodeLocation: undefined,
-			} as Element);
+			const createMockElement = (
+				nodeName: string,
+				attrs: Record<string, string>
+			): Element =>
+				({
+					nodeName,
+					tagName: nodeName.toUpperCase(),
+					attrs: Object.entries(attrs).map(([name, value]) => ({
+						name,
+						value,
+					})),
+					childNodes: [],
+					parentNode: null,
+					namespaceURI: "http://www.w3.org/1999/xhtml",
+					sourceCodeLocation: undefined,
+				} as Element);
 
 			it("skips eligible elements when they match skip patterns", () => {
-				const scriptElement = createMockElement("script", { src: "/analytics.js", id: "ga-script" });
-				const linkElement = createMockElement("link", { rel: "stylesheet", href: "/vendor.css" });
-				const preloadElement = createMockElement("link", { rel: "modulepreload", href: "/chunk.js" });
+				const scriptElement = createMockElement("script", {
+					src: "/analytics.js",
+					id: "ga-script",
+				});
+				const linkElement = createMockElement("link", {
+					rel: "stylesheet",
+					href: "/vendor.css",
+				});
+				const preloadElement = createMockElement("link", {
+					rel: "modulepreload",
+					href: "/chunk.js",
+				});
 
 				// Without skip patterns - should be eligible
 				expect(isEligibleForSri(scriptElement)).toBe(true);
@@ -1980,49 +2225,68 @@ describe("Additional Edge Cases and Error Paths", () => {
 				expect(isEligibleForSri(preloadElement)).toBe(true);
 
 				// With skip patterns - should be skipped
-				expect(isEligibleForSri(scriptElement, ["*analytics*"])).toBe(false);
+				expect(isEligibleForSri(scriptElement, ["*analytics*"])).toBe(
+					false
+				);
 				expect(isEligibleForSri(scriptElement, ["ga-*"])).toBe(false);
 				expect(isEligibleForSri(linkElement, ["*vendor*"])).toBe(false);
 				expect(isEligibleForSri(preloadElement, ["*.js"])).toBe(false);
 
 				// With non-matching patterns - should still be eligible
-				expect(isEligibleForSri(scriptElement, ["*tracking*"])).toBe(true);
-				expect(isEligibleForSri(linkElement, ["*.googleapis.com/*"])).toBe(true);
+				expect(isEligibleForSri(scriptElement, ["*tracking*"])).toBe(
+					true
+				);
+				expect(
+					isEligibleForSri(linkElement, ["*.googleapis.com/*"])
+				).toBe(true);
 				expect(isEligibleForSri(preloadElement, ["*main*"])).toBe(true);
 			});
 
 			it("handles complex element types with skip patterns", () => {
 				// Preload link with as="script"
-				const preloadScript = createMockElement("link", { 
-					rel: "preload", 
-					as: "script", 
-					href: "https://cdn.jsdelivr.net/lib.js" 
+				const preloadScript = createMockElement("link", {
+					rel: "preload",
+					as: "script",
+					href: "https://cdn.jsdelivr.net/lib.js",
 				});
 				expect(isEligibleForSri(preloadScript)).toBe(true);
-				expect(isEligibleForSri(preloadScript, ["*jsdelivr*"])).toBe(false);
+				expect(isEligibleForSri(preloadScript, ["*jsdelivr*"])).toBe(
+					false
+				);
 
 				// Preload link with as="style"
-				const preloadStyle = createMockElement("link", { 
-					rel: "preload", 
-					as: "style", 
-					href: "https://fonts.googleapis.com/css" 
+				const preloadStyle = createMockElement("link", {
+					rel: "preload",
+					as: "style",
+					href: "https://fonts.googleapis.com/css",
 				});
 				expect(isEligibleForSri(preloadStyle)).toBe(true);
-				expect(isEligibleForSri(preloadStyle, ["*.googleapis.com/*"])).toBe(false);
+				expect(
+					isEligibleForSri(preloadStyle, ["*.googleapis.com/*"])
+				).toBe(false);
 			});
 
 			it("maintains backward compatibility when no skip patterns provided", () => {
 				const elements = [
 					createMockElement("script", { src: "/main.js" }),
-					createMockElement("link", { rel: "stylesheet", href: "/style.css" }),
-					createMockElement("link", { rel: "modulepreload", href: "/chunk.js" }),
-					createMockElement("div", { id: "content" }) // Not eligible
+					createMockElement("link", {
+						rel: "stylesheet",
+						href: "/style.css",
+					}),
+					createMockElement("link", {
+						rel: "modulepreload",
+						href: "/chunk.js",
+					}),
+					createMockElement("div", { id: "content" }), // Not eligible
 				];
 
-				elements.forEach(element => {
+				elements.forEach((element) => {
 					const withoutPatterns = isEligibleForSri(element);
 					const withEmptyPatterns = isEligibleForSri(element, []);
-					const withUndefinedPatterns = isEligibleForSri(element, undefined);
+					const withUndefinedPatterns = isEligibleForSri(
+						element,
+						undefined
+					);
 
 					expect(withoutPatterns).toBe(withEmptyPatterns);
 					expect(withoutPatterns).toBe(withUndefinedPatterns);
@@ -2065,11 +2329,11 @@ describe("Additional Edge Cases and Error Paths", () => {
 				expect(result).toContain('href="/app.css" integrity=');
 				expect(result).toContain('href="/dynamic.js" integrity=');
 				expect(result).toContain('href="/lib.js" integrity=');
-				
+
 				// Should NOT have integrity for skipped resources
 				expect(result).not.toContain('src="/ga.js" integrity=');
 				expect(result).not.toContain('href="/vendor.css" integrity=');
-				
+
 				// But skipped elements should still be present
 				expect(result).toContain('id="analytics"');
 				expect(result).toContain('src="/ga.js"');
@@ -2095,21 +2359,30 @@ describe("Additional Edge Cases and Error Paths", () => {
 				});
 
 				const result = await addSriToHtml(html, bundle, mockLogger, {
-					skipResources: ["*.googletagmanager.com/*", "*.googleapis.com/*"],
+					skipResources: [
+						"*.googletagmanager.com/*",
+						"*.googleapis.com/*",
+					],
 				});
 
 				// Should have integrity for local resources only
 				expect(result).toContain('src="/app.js" integrity=');
-				expect(result).toContain('href="/styles.css" rel="stylesheet" integrity=');
-				
+				expect(result).toContain(
+					'href="/styles.css" rel="stylesheet" integrity='
+				);
+
 				// Should NOT have integrity for external CDN resources
-				expect(result).not.toContain('googletagmanager.com/gtag/js" integrity=');
-				expect(result).not.toContain('fonts.googleapis.com/css2" integrity=');
+				expect(result).not.toContain(
+					'googletagmanager.com/gtag/js" integrity='
+				);
+				expect(result).not.toContain(
+					'fonts.googleapis.com/css2" integrity='
+				);
 			});
 
 			it("validates performance impact with large skip pattern lists", async () => {
 				const mockLogger = createMockBundleLogger();
-				
+
 				// Create large pattern list
 				const skipPatterns = [];
 				for (let i = 0; i < 100; i++) {
@@ -2119,46 +2392,60 @@ describe("Additional Edge Cases and Error Paths", () => {
 				}
 
 				// Create HTML with many elements
-				const scripts = Array(50).fill(0).map((_, i) => 
-					`<script src="/script-${i}.js"></script>`
-				).join('');
+				const scripts = Array(50)
+					.fill(0)
+					.map((_, i) => `<script src="/script-${i}.js"></script>`)
+					.join("");
 				const html = `<html><head>${scripts}</head></html>`;
 
 				const bundle = mockBundle(
 					Object.fromEntries(
-						Array(50).fill(0).map((_, i) => [`script-${i}.js`, `console.log(${i})`])
+						Array(50)
+							.fill(0)
+							.map((_, i) => [
+								`script-${i}.js`,
+								`console.log(${i})`,
+							])
 					)
 				);
 
 				const start = performance.now();
-				
+
 				const result = await addSriToHtml(html, bundle, mockLogger, {
 					skipResources: skipPatterns,
 				});
-				
+
 				const end = performance.now();
 				const duration = end - start;
-				
+
 				// Should complete within reasonable time even with large pattern list
 				expect(duration).toBeLessThan(500); // 500ms max
-				
+
 				// All scripts should have integrity (none match skip patterns)
-				const integrityCount = (result.match(/integrity=/g) || []).length;
+				const integrityCount = (result.match(/integrity=/g) || [])
+					.length;
 				expect(integrityCount).toBe(50);
 			});
 		});
 
 		describe("Error Handling and Edge Cases", () => {
 			// Helper function to create test elements
-			const createTestElement = (nodeName: string, attrs: { name: string; value: string }[]): Element => ({
-				nodeName,
-				tagName: nodeName,
-				attrs: attrs.map(attr => ({ name: attr.name, value: attr.value })),
-				namespaceURI: "http://www.w3.org/1999/xhtml",
-				childNodes: [],
-				parentNode: null,
-				sourceCodeLocation: undefined,
-			} as Element);
+			const createTestElement = (
+				nodeName: string,
+				attrs: { name: string; value: string }[]
+			): Element =>
+				({
+					nodeName,
+					tagName: nodeName,
+					attrs: attrs.map((attr) => ({
+						name: attr.name,
+						value: attr.value,
+					})),
+					namespaceURI: "http://www.w3.org/1999/xhtml",
+					childNodes: [],
+					parentNode: null,
+					sourceCodeLocation: undefined,
+				} as Element);
 
 			it("handles malformed patterns gracefully", () => {
 				const malformedPatterns = [
@@ -2167,12 +2454,14 @@ describe("Additional Edge Cases and Error Paths", () => {
 					"   ", // Whitespace-only
 					"\\", // Single backslash
 					"[[[", // Unmatched brackets
-					"(((" // Unmatched parentheses
+					"(((", // Unmatched parentheses
 				];
 
-				const testElement = createTestElement("script", [{ name: "src", value: "test.js" }]);
-				
-				malformedPatterns.forEach(pattern => {
+				const testElement = createTestElement("script", [
+					{ name: "src", value: "test.js" },
+				]);
+
+				malformedPatterns.forEach((pattern) => {
 					// Should not throw and should handle gracefully
 					expect(() => {
 						shouldSkipElement(testElement, [pattern]);
@@ -2183,29 +2472,34 @@ describe("Additional Edge Cases and Error Paths", () => {
 			it("handles very long patterns and URLs efficiently", () => {
 				const longPath = "a/".repeat(1000) + "file.js";
 				const longPattern = "*/" + "long/".repeat(500) + "*";
-				
+
 				const start = performance.now();
 				const result = matchesPattern(longPattern, longPath);
 				const end = performance.now();
-				
+
 				expect(typeof result).toBe("boolean");
 				expect(end - start).toBeLessThan(10); // Should be very fast
 			});
 
 			it("maintains performance with stress testing", () => {
-				const patterns = ["*analytics*", "vendor-*", "*.googleapis.com/*", "*tracking*"];
-				
+				const patterns = [
+					"*analytics*",
+					"vendor-*",
+					"*.googleapis.com/*",
+					"*tracking*",
+				];
+
 				const start = performance.now();
-				
+
 				// Process 5000 elements
 				for (let i = 0; i < 5000; i++) {
 					const element = createTestElement("script", [
 						{ name: "src", value: `script-${i}.js` },
-						{ name: "id", value: `element-${i}` }
+						{ name: "id", value: `element-${i}` },
 					]);
 					shouldSkipElement(element, patterns);
 				}
-				
+
 				const end = performance.now();
 				expect(end - start).toBeLessThan(100); // Should complete in under 100ms
 			});
