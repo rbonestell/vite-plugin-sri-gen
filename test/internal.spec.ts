@@ -627,7 +627,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should process without throwing
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// Check that HTML was processed
 			const processedHtml = String(bundle["index.html"].source);
@@ -656,7 +656,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should handle gracefully without throwing
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 		});
 
 		it("handles integrity computation errors", async () => {
@@ -683,7 +683,7 @@ describe("Processing Classes", () => {
 			};
 
 			// Should handle any errors gracefully
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			cleanup();
 		});
@@ -713,7 +713,7 @@ describe("Processing Classes", () => {
 				};
 			}
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 		});
 
 		it("builds integrity mappings directly", async () => {
@@ -832,7 +832,7 @@ describe("Processing Classes", () => {
 				},
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// Check that HTML includes preload links for dynamic chunks
 			const processedHtml = String(bundle["index.html"].source);
