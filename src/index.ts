@@ -65,11 +65,13 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
 
-	return {
+	const plugin = {
 		name: "vite-plugin-sri-gen",
 		enforce: "post",
 		// Only run during `vite build`
 		apply: "build",
+		order: "post",
+		sequential: true,
 
 		configResolved(config: ResolvedConfig): void {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
@@ -108,9 +110,9 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 			});
 		},
 
-		async generateBundle(_options: unknown, bundle: OutputBundle) {
+		async writeBundle(_options: unknown, bundle: OutputBundle) {
 			/**
-			 * Main entry point for bundle generation with SRI processing.
+			 * Main entry point for SRI processing after bundle write completion.
 			 * This function orchestrates the entire SRI generation workflow:
 			 * 1. Validates input parameters and initializes logging
 			 * 2. Builds integrity mappings for all processable assets
@@ -200,4 +202,6 @@ export default function sri(options: SriPluginOptions = {}): Plugin & {
 			return { code: injected + code, map: null };
 		},
 	} as any;
+
+	return plugin;
 }

@@ -231,7 +231,7 @@ describe("vite-plugin-sri-gen", () => {
 				"entry.js": { code: "console.log(1)" },
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			const out = String(bundle["index.html"].source);
 			expect(out).toContain('integrity="sha256-');
 			expect(out).toContain('crossorigin="anonymous"');
@@ -247,7 +247,7 @@ describe("vite-plugin-sri-gen", () => {
 				"a.js": { code: "console.log(1)" },
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			const out = String(bundle["index.html"].source);
 			expect(out).toContain('integrity="sha256-abc"');
 		});
@@ -262,7 +262,7 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: true },
 			} as any);
 			const bundle: any = { "entry.js": { code: "console.log(1)" } };
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			expect(spies.warn).toHaveBeenCalled();
 			cleanup();
 		});
@@ -279,7 +279,7 @@ describe("vite-plugin-sri-gen", () => {
 				"index.html": { type: "asset", source: badSource },
 				"entry.js": { code: "console.log(1)" },
 			};
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			expect(spies.warn).toHaveBeenCalled();
 			cleanup();
 		});
@@ -295,7 +295,7 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: false },
 			} as any);
 			const bundle: any = { "entry.js": { code: "console.log(1)" } };
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			expect(spies.warn).not.toHaveBeenCalled();
 			cleanup();
 		});
@@ -311,7 +311,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 				"a.js": { code: "console.log(1)" },
 			};
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			const out = String(bundle["index.html"].source);
 			expect(out).toContain("integrity=");
 		});
@@ -327,7 +327,7 @@ describe("vite-plugin-sri-gen", () => {
 				build: { ssr: true },
 			} as any);
 			// Call with plugin context containing warn()
-			await plugin.generateBundle.call(mockContext, {}, {} as any);
+			await plugin.writeBundle.call(mockContext, {}, {} as any);
 			expect(mockContext.warn).toHaveBeenCalled();
 		});
 	});
@@ -338,7 +338,7 @@ describe("vite-plugin-sri-gen", () => {
 			const mockContext = createMockPluginContext();
 
 			// First create the logger by calling generateBundle once
-			await plugin.generateBundle.call(mockContext, {}, {
+			await plugin.writeBundle.call(mockContext, {}, {
 				"test.js": { type: "chunk", code: "console.log('test')" },
 			} as any);
 
@@ -469,7 +469,7 @@ describe("vite-plugin-sri-gen", () => {
 					source: cssBytes,
 				},
 			};
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 			// This test ensures binary source handling works without throwing errors
 		});
 
@@ -490,7 +490,7 @@ describe("vite-plugin-sri-gen", () => {
 					source: "console.log('ok')",
 				},
 			};
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 		});
 	});
 
@@ -522,7 +522,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			// Should inject rel=modulepreload with base-prefixed href, integrity and crossorigin
@@ -553,7 +553,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			// Only one occurrence expected
@@ -592,7 +592,7 @@ describe("vite-plugin-sri-gen", () => {
 				),
 			} as any;
 
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 
 			expect(out).not.toContain(
@@ -654,7 +654,7 @@ describe("vite-plugin-sri-gen", () => {
 				[dyn.fileName]: dyn,
 			} as any;
 
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/base\/assets\/chunk-by-name\.js" integrity="sha256-/
@@ -680,7 +680,7 @@ describe("vite-plugin-sri-gen", () => {
 					"src/chunkA.ts"
 				),
 			} as any;
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/assets\/chunk-A\.js" integrity="sha256-[^"]+">/
@@ -714,7 +714,7 @@ describe("vite-plugin-sri-gen", () => {
 				[entry.fileName]: entry,
 				[dyn.fileName]: dyn,
 			} as any;
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const out = String((bundle["index.html"] as Asset).source);
 			expect(out).toMatch(
 				/<link rel="modulepreload" href="\/base\/assets\/chunk-by-name\.js" integrity="sha256-/
@@ -735,7 +735,7 @@ describe("vite-plugin-sri-gen", () => {
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
 			// Build SRI map by running generateBundle on a bundle with one JS asset
 			const bundle = makeBundle("assets/chunk-A.js", "console.log('A')");
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('x')", {
 				isEntry: true,
@@ -757,7 +757,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("sets integrity but omits crossorigin when not configured", async () => {
 			const plugin = sri() as any; // no crossorigin option
 			const bundle = makeBundle("assets/chunk-B.js", "console.log('B')");
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('y')", {
 				isEntry: true,
@@ -776,7 +776,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("sets integrity for scripts via setAttribute path", async () => {
 			const plugin = sri() as any;
 			const bundle = makeBundle("assets/mod.js", "export{};");
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const result = plugin.renderChunk("console.log('z')", {
 				isEntry: true,
 			} as any);
@@ -794,7 +794,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
 			const bundle = makeBundle("assets/ins.js", "export{};");
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 			const result = plugin.renderChunk("console.log('i')", {
 				isEntry: true,
 			} as any);
@@ -996,7 +996,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			// Should throw the error after handling it
 			await expect(
-				plugin.generateBundle.call(mockContext, {}, bundle)
+				plugin.writeBundle.call(mockContext, {}, bundle)
 			).rejects.toThrow("Simulated integrity mapping error");
 
 			// Restore the spy
@@ -1024,7 +1024,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// Should call console.error for the error message and error object in development
 			expect(spies.error).toHaveBeenCalledWith(
@@ -1052,7 +1052,7 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Call with plugin context that has an error method
-			await plugin.generateBundle.call(mockContext, {}, bundle);
+			await plugin.writeBundle.call(mockContext, {}, bundle);
 
 			// The plugin error method should be called for HTML processing errors
 			// (Error is caught at HTML processor level, so just verify plugin context exists)
@@ -1075,7 +1075,7 @@ describe("vite-plugin-sri-gen", () => {
 			};
 
 			// Call without plugin context to use console fallback
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			expect(spies.error).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to process HTML file"),
@@ -1104,7 +1104,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// Should log all info messages including completion
 			expect(spies.info).toHaveBeenCalledWith(
@@ -1136,7 +1136,7 @@ describe("vite-plugin-sri-gen", () => {
 			// Should throw and call handleGenerateBundleError
 			// This test primarily covers the validation path, not actual error throwing.
 			// The bundle with null code will be handled gracefully (skipped), not thrown.
-			const result = await plugin.generateBundle({}, bundle);
+			const result = await plugin.writeBundle({}, bundle);
 			expect(result).toBeUndefined();
 		});
 
@@ -1158,7 +1158,7 @@ describe("vite-plugin-sri-gen", () => {
 				},
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// In production, info is still logged by the BundleLogger implementation
 			expect(spies.info).toHaveBeenCalled();
@@ -1171,7 +1171,7 @@ describe("vite-plugin-sri-gen", () => {
 			const { spies, cleanup } = spyOnConsole();
 			const plugin = sri() as any;
 
-			await plugin.generateBundle({}, {});
+			await plugin.writeBundle({}, {});
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Empty bundle detected")
@@ -1185,14 +1185,14 @@ describe("vite-plugin-sri-gen", () => {
 			const plugin = sri() as any;
 
 			// Test with null bundle
-			await plugin.generateBundle({}, null);
+			await plugin.writeBundle({}, null);
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Invalid bundle provided")
 			);
 
 			// Test with non-object bundle
-			await plugin.generateBundle({}, "not-an-object");
+			await plugin.writeBundle({}, "not-an-object");
 
 			expect(spies.warn).toHaveBeenCalledWith(
 				expect.stringContaining("Invalid bundle provided")
@@ -1232,7 +1232,7 @@ describe("vite-plugin-sri-gen", () => {
 				// Note: missing the actual "missing-chunk.js" file to trigger the warning
 			};
 
-			await plugin.generateBundle({}, bundle);
+			await plugin.writeBundle({}, bundle);
 
 			// Should warn about unresolved dynamic import (different path hit)
 			expect(spies.warn).toHaveBeenCalledWith(
@@ -1379,7 +1379,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("handles error in maybeSetIntegrity during node insertion", async () => {
 			const plugin = sri() as any;
 			const bundle = makeBundle("assets/error.js", "export default 42;");
-			await plugin.generateBundle({}, bundle as any);
+			await plugin.writeBundle({}, bundle as any);
 
 			const result = plugin.renderChunk("console.log('test')", {
 				isEntry: true,
