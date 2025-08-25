@@ -73,6 +73,8 @@ export interface HtmlProcessorConfig {
   fetchTimeoutMs: number;
   /** Logger instance for consistent error reporting */
   logger: BundleLogger;
+  /** Skip patterns for excluding resources from SRI processing */
+  skipResources: string[];
 }
 
 // #endregion
@@ -321,6 +323,89 @@ export function computeIntegrity(
 }
 
 /**
+ * Checks if a glob pattern matches a given string.
+ * Supports simple glob patterns with '*' wildcards.
+ * 
+ * Pattern matching rules:
+ * - '*' matches any sequence of characters (including empty)
+ * - Exact matches are supported
+ * - Case-sensitive matching
+ * 
+ * @param pattern - Glob pattern to match against
+ * @param str - String to test
+ * @returns true if pattern matches string
+ * 
+ * @example
+ * matchesPattern("*.js", "script.js") // true
+ * matchesPattern("vendor-*", "vendor-react") // true
+ * matchesPattern("exact.css", "exact.css") // true
+ */
+export function matchesPattern(pattern: string, str: string): boolean {
+	if (!pattern || !str) return false;
+	
+	// Handle exact matches first for efficiency
+	if (pattern === str) return true;
+	
+	// Convert glob pattern to regex
+	// Escape special regex characters except for *
+	const escaped = pattern
+		.replace(/[.+?^${}()|[\]\\]/g, '\\$&') // Escape special regex chars
+		.replace(/\*/g, '.*'); // Convert * to .*
+	
+	// Create regex with anchors to match entire string
+	const regex = new RegExp(`^${escaped}$`);
+	return regex.test(str);
+}
+
+/**
+ * Determines if an element should be skipped based on skip patterns.
+ * Checks both element ID and URL (src/href) attributes against patterns.
+ * 
+ * Skip conditions:
+ * - Element has an 'id' attribute matching any pattern
+ * - Element has 'src' or 'href' attribute matching any pattern
+ * 
+ * @param element - parse5 Element to check
+ * @param skipPatterns - Array of glob patterns to match against
+ * @returns true if element should be skipped
+ * 
+ * @example
+ * shouldSkipElement(scriptEl, ["analytics-*"]) // checks id and src
+ * shouldSkipElement(linkEl, ["*.googleapis.com/*"]) // checks id and href
+ */
+export function shouldSkipElement(
+	element: Element,
+	skipPatterns: string[]
+): boolean {
+	if (!skipPatterns || skipPatterns.length === 0) return false;
+	
+	// Get element attributes for checking
+	const id = getAttrValue(element, "id");
+	const src = getAttrValue(element, "src");
+	const href = getAttrValue(element, "href");
+	
+	// Check each skip pattern against available attributes
+	for (const pattern of skipPatterns) {
+		// Check ID attribute
+		if (id && matchesPattern(pattern, id)) {
+			return true;
+		}
+		
+		// Check src attribute (for scripts)
+		if (src && matchesPattern(pattern, src)) {
+			return true;
+		}
+		
+		// Check href attribute (for links)
+		if (href && matchesPattern(pattern, href)) {
+			return true;
+		}
+	}
+	
+	return false;
+}
+
+/**
  * Determines the appropriate URL attribute name for a parse5 Element.
  * Script elements use "src", all other elements use "href" by default.
  *
@@ -437,10 +522,16 @@ export async function processElement(
 /**
  * Checks if an element matches the SRI-eligible criteria
  * @param element - parse5 Element to check
+ * @param skipPatterns - Optional skip patterns to exclude elements
  * @returns true if element should have SRI attributes added
  */
-function isEligibleForSri(element: Element): boolean {
+export function isEligibleForSri(element: Element, skipPatterns?: string[]): boolean {
 	if (!element.nodeName || !element.attrs) return false;
+
+	// Check skip patterns first if provided
+	if (skipPatterns && shouldSkipElement(element, skipPatterns)) {
+		return false;
+	}
 
 	const tagName = element.nodeName.toLowerCase();
 	const rel = getAttrValue(element, "rel")?.toLowerCase();
@@ -491,10 +582,12 @@ export async function addSriToHtml(
 		algorithm = "sha384",
 		crossorigin,
 		resourceOpts,
+		skipResources = [],
 	}: {
     algorithm?: "sha256" | "sha384" | "sha512";
     crossorigin?: "anonymous" | "use-credentials";
     resourceOpts?: LoadResourceOptions;
+    skipResources?: string[];
   } = {}
 ): Promise<string> {
 	try {
@@ -504,7 +597,9 @@ export async function addSriToHtml(
 		});
 
 		// Find all eligible elements for SRI processing
-		const eligibleElements = findElements(document, isEligibleForSri);
+		const eligibleElements = findElements(document, (element) => 
+			isEligibleForSri(element, skipResources)
+		);
 
 		// Process all elements in parallel with error handling
 		await Promise.all(
@@ -1351,6 +1446,7 @@ export class HtmlProcessor {
 				enableCache: this.config.enableCache,
 				fetchTimeoutMs: this.config.fetchTimeoutMs,
 			},
+			skipResources: this.config.skipResources,
 		});
 	}
 
@@ -1548,11 +1644,14 @@ export class HtmlProcessor {
  * - HTMLLinkElement with rel="preload" and as="script|style|font"
  *
  * @param sriByPathname - Map of pathnames to their SRI integrity values
- * @param opts - Configuration options for CORS settings
+ * @param opts - Configuration options for CORS settings and skip patterns
  */
 export function installSriRuntime(
 	sriByPathname: Record<string, string>,
-	opts?: { crossorigin?: false | "anonymous" | "use-credentials" }
+	opts?: { 
+		crossorigin?: false | "anonymous" | "use-credentials";
+		skipResources?: string[];
+	}
 ) {
 	try {
 		// ========================================================================
@@ -1567,6 +1666,46 @@ export function installSriRuntime(
 			opts && Object.prototype.hasOwnProperty.call(opts, "crossorigin")
 				? (opts as any).crossorigin
 				: "anonymous";
+				
+		// Extract skip patterns with default fallback
+		const skipPatterns = (opts && (opts as any).skipResources) || [];
+		
+		/**
+		 * Runtime version of pattern matching for skip logic
+		 */
+		const matchesPatternRuntime = (pattern: string, str: string): boolean => {
+			if (!pattern || !str) return false;
+			if (pattern === str) return true;
+			
+			// Convert glob pattern to regex
+			const escaped = pattern
+				.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+				.replace(/\*/g, '.*');
+			
+			const regex = new RegExp(`^${escaped}$`);
+			return regex.test(str);
+		};
+		
+		/**
+		 * Runtime check if element should be skipped
+		 */
+		const shouldSkipElementRuntime = (el: any): boolean => {
+			if (!skipPatterns || skipPatterns.length === 0) return false;
+			
+			const id = el.getAttribute && el.getAttribute("id");
+			const src = el.getAttribute && el.getAttribute("src");
+			const href = el.getAttribute && el.getAttribute("href");
+			
+			for (const pattern of skipPatterns) {
+				if ((id && matchesPatternRuntime(pattern, id)) ||
+					(src && matchesPatternRuntime(pattern, src)) ||
+					(href && matchesPatternRuntime(pattern, href))) {
+					return true;
+				}
+			}
+			
+			return false;
+		};
 
 		// ========================================================================
 		// INTEGRITY LOOKUP HELPER
@@ -1612,6 +1751,9 @@ export function installSriRuntime(
      */
 		const maybeSetIntegrity = (el: any) => {
 			if (!el) return;
+			
+			// Check skip patterns first
+			if (shouldSkipElementRuntime(el)) return;
 
 			// ====================================================================
 			// ELEMENT TYPE DETECTION
@@ -1777,12 +1919,15 @@ export function installSriRuntime(
  * This version accepts dependencies to enable proper testing without global overrides.
  *
  * @param sriByPathname - Map of pathnames to their SRI integrity values
- * @param opts - Configuration options for CORS settings
+ * @param opts - Configuration options for CORS settings and skip patterns
  * @param dependencies - Injected dependencies for DOM/URL operations (defaults to production)
  */
 export function installSriRuntimeWithDeps(
 	sriByPathname: Record<string, string>,
-	opts?: { crossorigin?: false | "anonymous" | "use-credentials" },
+	opts?: { 
+		crossorigin?: false | "anonymous" | "use-credentials";
+		skipResources?: string[];
+	},
 	dependencies: IRuntimeDependencies = defaultDependencies
 ) {
 	try {
@@ -1796,6 +1941,47 @@ export function installSriRuntimeWithDeps(
 			opts && Object.prototype.hasOwnProperty.call(opts, "crossorigin")
 				? (opts as any).crossorigin
 				: "anonymous";
+				
+		// Extract skip patterns with default fallback
+		const skipPatterns = (opts && (opts as any).skipResources) || [];
+		
+		/**
+		 * Runtime version of pattern matching for skip logic
+		 */
+		const matchesPatternRuntime = (pattern: string, str: string): boolean => {
+			if (!pattern || !str) return false;
+			if (pattern === str) return true;
+			
+			// Convert glob pattern to regex
+			const escaped = pattern
+				.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+				.replace(/\*/g, '.*');
+			
+			const regex = new RegExp(`^${escaped}$`);
+			return regex.test(str);
+		};
+		
+		/**
+		 * Runtime check if element should be skipped using DOM adapter
+		 */
+		const shouldSkipElementRuntime = (el: any): boolean => {
+			if (!skipPatterns || skipPatterns.length === 0) return false;
+			
+			// Use element's getAttribute method directly as DOM adapter doesn't expose it
+			const id = el.getAttribute && el.getAttribute("id");
+			const src = el.getAttribute && el.getAttribute("src");
+			const href = el.getAttribute && el.getAttribute("href");
+			
+			for (const pattern of skipPatterns) {
+				if ((id && matchesPatternRuntime(pattern, id)) ||
+					(src && matchesPatternRuntime(pattern, src)) ||
+					(href && matchesPatternRuntime(pattern, href))) {
+					return true;
+				}
+			}
+			
+			return false;
+		};
 
 		/**
 		 * Gets integrity value for a given URL using the URL adapter
@@ -1818,6 +2004,9 @@ export function installSriRuntimeWithDeps(
 		 */
 		const maybeSetIntegrity = (el: any) => {
 			if (!el) return;
+			
+			// Check skip patterns first
+			if (shouldSkipElementRuntime(el)) return;
 
 			// Use DOM adapter for element type checking
 			const isLink = domAdapter.isHTMLLinkElement(el);

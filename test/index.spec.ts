@@ -1618,4 +1618,89 @@ describe("vite-plugin-sri-gen", () => {
 			}
 		});
 	});
+
+	describe("Skip Resources Integration Tests", () => {
+		it("end-to-end integration with skipResources option", async () => {
+			const pluginContext = createMockPluginContext();
+			const sriPlugin = sri({
+				algorithm: "sha256",
+				skipResources: ["analytics", "*/vendor-*"],
+			});
+
+			// Test HTML with both skipped and non-skipped resources
+			const html = `
+				<html>
+					<head>
+						<script id="analytics" src="/analytics.js"></script>
+						<script src="/main.js"></script>
+						<link rel="stylesheet" href="/vendor-styles.css" />
+						<link rel="stylesheet" href="/app.css" />
+					</head>
+				</html>
+			`;
+
+			const bundle = {
+				"analytics.js": {
+					type: "chunk" as const,
+					code: "console.log('analytics')",
+					fileName: "analytics.js",
+				},
+				"main.js": {
+					type: "chunk" as const,
+					code: "console.log('main')",
+					fileName: "main.js",
+				},
+				"vendor-styles.css": {
+					type: "asset" as const,
+					source: ".vendor{}",
+					fileName: "vendor-styles.css",
+				},
+				"app.css": {
+					type: "asset" as const,
+					source: ".app{}",
+					fileName: "app.css",
+				},
+			};
+
+			const result = await sriPlugin.transformIndexHtml(html, { bundle });
+
+			// Should have integrity for main.js and app.css only
+			expect(result).toContain('src="/main.js" integrity="sha256-');
+			expect(result).toContain('href="/app.css" integrity="sha256-');
+			
+			// Should NOT have integrity for analytics.js and vendor-styles.css
+			expect(result).not.toContain('src="/analytics.js" integrity=');
+			expect(result).not.toContain('href="/vendor-styles.css" integrity=');
+			
+			// But the elements should still be present
+			expect(result).toContain('src="/analytics.js"');
+			expect(result).toContain('href="/vendor-styles.css"');
+		});
+
+		it("works with runtime SRI injection and skip patterns", () => {
+			const sriByPathname = {
+				"/main.js": "sha256-abc123",
+				"/analytics.js": "sha256-def456",
+				"/app.css": "sha256-ghi789",
+				"/vendor.css": "sha256-jkl012",
+			};
+
+			// Test that runtime skip functionality doesn't throw
+			expect(() => {
+				installSriRuntime(sriByPathname, {
+					crossorigin: "anonymous",
+					skipResources: ["*analytics*", "*vendor*"],
+				});
+			}).not.toThrow();
+
+			// Test with dependencies injection
+			const dependencies = createTestDependencies();
+			expect(() => {
+				installSriRuntimeWithDeps(sriByPathname, {
+					crossorigin: "anonymous",
+					skipResources: ["*analytics*", "*vendor*"],
+				}, dependencies);
+			}).not.toThrow();
+		});
+	});
 });
