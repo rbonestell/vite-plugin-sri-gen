@@ -1191,4 +1191,66 @@ describe("Default Dependencies", () => {
 		);
 		expect(result).toBe("http://example.com/test.js");
 	});
+
+	describe("Additional Coverage Tests", () => {
+		/**
+		 * Additional tests to achieve 100% code coverage
+		 * Specifically targeting line 131 in dom-abstraction.ts
+		 */
+
+		it("should handle preload link with font type", () => {
+			/**
+			 * Test coverage for line 131 in dom-abstraction.ts
+			 * Specifically testing the font case in the preload link condition
+			 */
+			const mockElement = {
+				tagName: 'LINK',
+				nodeName: 'LINK',
+				getAttribute: vi.fn((attr: string) => {
+					if (attr === 'rel') return 'preload';
+					if (attr === 'as') return 'font';
+					return null;
+				}),
+				hasAttribute: vi.fn((attr: string) => {
+					if (attr === 'href') return true;
+					if (attr === 'integrity') return false;
+					return false;
+				})
+			};
+
+			const result = defaultDependencies.domAdapter.isEligibleForSRI(mockElement);
+
+			expect(result).toBe(true);
+			expect(mockElement.getAttribute).toHaveBeenCalledWith('rel');
+			expect(mockElement.getAttribute).toHaveBeenCalledWith('as');
+			expect(mockElement.hasAttribute).toHaveBeenCalledWith('href');
+			expect(mockElement.hasAttribute).toHaveBeenCalledWith('integrity');
+		});
+
+		it("should handle preload link with style type", () => {
+			/**
+			 * Additional test for preload link with style type
+			 * to ensure comprehensive coverage of the array includes check
+			 */
+			const mockElement = {
+				tagName: 'LINK',
+				nodeName: 'LINK',
+				getAttribute: vi.fn((attr: string) => {
+					if (attr === 'rel') return 'preload';
+					if (attr === 'as') return 'style';
+					return null;
+				}),
+				hasAttribute: vi.fn((attr: string) => {
+					if (attr === 'href') return true;
+					if (attr === 'integrity') return false;
+					return false;
+				})
+			};
+
+			const result = defaultDependencies.domAdapter.isEligibleForSRI(mockElement);
+
+			expect(result).toBe(true);
+			expect(mockElement.getAttribute).toHaveBeenCalledWith('as');
+		});
+	});
 });
