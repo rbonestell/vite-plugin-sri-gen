@@ -28,7 +28,7 @@
 > Unfortunately, this plugin is not compatible with most [SSR (server-side rendering)](https://vuejs.org/guide/scaling-up/ssr.html) projects, including but not limited to those using Svelte.
 > This plugin works by hooking into the Vite and Rollup events at build time to calculate integrity hashes and apply them to the HTML elements. Because SSR projects typically do not generate markup at build time, this plugin is effectively a no-op when implemented in most SSR projects.
 >
-> The exception to this is when an SSR project utilizes pre-rendering; explicitly building, bundling, and outputting prerendered HTML during the build. Vite plugins such as [vite-plugin-ssr](https://vite-plugin-ssr.com/pre-rendering) support this, but this typically not the case for most SSR projects.
+> The exception to this is when an SSR project utilizes pre-rendering; explicitly building, bundling, and outputting prerendered HTML during the build. Vite plugins such as [vite-plugin-ssr](https://vite-plugin-ssr.com/pre-rendering) support this, but this is typically not the case for most SSR projects.
 
 ## Table of Contents
 
