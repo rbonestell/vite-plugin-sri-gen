@@ -552,31 +552,48 @@ describe("vite-plugin-sri-gen", () => {
 			);
 		});
 
-		it("injects runtime into entry chunks when enabled", () => {
+		it("injects runtime into entry chunks when enabled", async () => {
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
-			// Simulate renderChunk on an entry
-			const result = plugin.renderChunk("console.log('x')", {
-				isEntry: true,
-			} as any);
-			expect(result && typeof result.code === "string").toBe(true);
-			const code = (result as any).code as string;
-			expect(code).toContain("installSriRuntime");
-			expect(code).toContain("crossorigin");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('x')" }),
+			} as any;
+			
+			// Runtime injection now happens in generateBundle
+			await plugin.generateBundle.handler({}, bundle as any);
+			
+			// Verify runtime was injected into entry chunk
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain("installSriRuntime");
+			expect(entryCode).toContain("crossorigin");
 		});
 
-		it("does not inject runtime when disabled", () => {
+		it("does not inject runtime when disabled", async () => {
 			const plugin = sri({ runtimePatchDynamicLinks: false }) as any;
-			const result = plugin.renderChunk("console.log('x')", {
-				isEntry: true,
-			} as any);
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// renderChunk should always return null now
+			const result = plugin.renderChunk();
 			expect(result).toBeNull();
+			
+			// Verify runtime is NOT injected in generateBundle when disabled
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('x')" }),
+			} as any;
+			await plugin.generateBundle.handler({}, bundle as any);
+			
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).not.toContain("installSriRuntime");
 		});
 
-		it("renderChunk returns null for non-entry chunks", () => {
+		it("renderChunk returns null for all chunks (injection moved to generateBundle)", () => {
 			const plugin = sri() as any;
-			const result = plugin.renderChunk("console.log('no entry')", {
-				isEntry: false,
-			} as any);
+			// renderChunk now always returns null since injection moved to generateBundle
+			const result = plugin.renderChunk();
 			expect(result).toBeNull();
 		});
 
@@ -685,14 +702,19 @@ describe("vite-plugin-sri-gen", () => {
 
 		it("sets integrity and crossorigin on link via setAttribute path", async () => {
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
-			// Build SRI map by running generateBundle on a bundle with one JS asset
-			const bundle = makeBundle("assets/chunk-A.js", "console.log('A')");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk that will have runtime injected
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('x')" }),
+				"assets/chunk-A.js": makeDynChunk("assets/chunk-A.js", "src/chunkA.ts"),
+			} as any;
+			(bundle["assets/chunk-A.js"] as Chunk).code = "console.log('A')";
+			
+			// Runtime is now injected in generateBundle
 			await plugin.generateBundle.handler({}, bundle as any);
-
-			const result = plugin.renderChunk("console.log('x')", {
-				isEntry: true,
-			} as any);
-			const injected = (result as any).code as string;
+			const injected = (bundle["assets/entry.js"] as Chunk).code;
 
 			// Execute the injected runtime code to install patches
 			new Function(injected)();
@@ -708,13 +730,18 @@ describe("vite-plugin-sri-gen", () => {
 
 		it("sets integrity but omits crossorigin when not configured", async () => {
 			const plugin = sri() as any; // no crossorigin option
-			const bundle = makeBundle("assets/chunk-B.js", "console.log('B')");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('y')" }),
+				"assets/chunk-B.js": makeDynChunk("assets/chunk-B.js", "src/chunkB.ts"),
+			} as any;
+			(bundle["assets/chunk-B.js"] as Chunk).code = "console.log('B')";
+			
 			await plugin.generateBundle.handler({}, bundle as any);
-
-			const result = plugin.renderChunk("console.log('y')", {
-				isEntry: true,
-			} as any);
-			const injected = (result as any).code as string;
+			const injected = (bundle["assets/entry.js"] as Chunk).code;
 			new Function(injected)();
 
 			const link = new (globalThis as any).HTMLLinkElement();
@@ -727,12 +754,19 @@ describe("vite-plugin-sri-gen", () => {
 
 		it("sets integrity for scripts via setAttribute path", async () => {
 			const plugin = sri() as any;
-			const bundle = makeBundle("assets/mod.js", "export{};");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('z')" }),
+				"assets/mod.js": makeDynChunk("assets/mod.js", "src/mod.ts"),
+			} as any;
+			(bundle["assets/mod.js"] as Chunk).code = "export{};";
+			
 			await plugin.generateBundle.handler({}, bundle as any);
-			const result = plugin.renderChunk("console.log('z')", {
-				isEntry: true,
-			} as any);
-			new Function((result as any).code)();
+			const injected = (bundle["assets/entry.js"] as Chunk).code;
+			new Function(injected)();
 
 			const script = new (globalThis as any).HTMLScriptElement();
 			(script as any).setAttribute("src", "/assets/mod.js");
@@ -745,12 +779,19 @@ describe("vite-plugin-sri-gen", () => {
 			cleanup = setupFakeDom(true);
 
 			const plugin = sri({ crossorigin: "anonymous" }) as any;
-			const bundle = makeBundle("assets/ins.js", "export{};");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('i')" }),
+				"assets/ins.js": makeDynChunk("assets/ins.js", "src/ins.ts"),
+			} as any;
+			(bundle["assets/ins.js"] as Chunk).code = "export{};";
+			
 			await plugin.generateBundle.handler({}, bundle as any);
-			const result = plugin.renderChunk("console.log('i')", {
-				isEntry: true,
-			} as any);
-			new Function((result as any).code)();
+			const injected = (bundle["assets/entry.js"] as Chunk).code;
+			new Function(injected)();
 
 			// Parent Node with appendChild
 			const parent: any = Object.create(
@@ -1330,13 +1371,19 @@ describe("vite-plugin-sri-gen", () => {
 
 		it("handles error in maybeSetIntegrity during node insertion", async () => {
 			const plugin = sri() as any;
-			const bundle = makeBundle("assets/error.js", "export default 42;");
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+			
+			// Create bundle with entry chunk
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({ code: "console.log('test')" }),
+				"assets/error.js": makeDynChunk("assets/error.js", "src/error.ts"),
+			} as any;
+			(bundle["assets/error.js"] as Chunk).code = "export default 42;";
+			
 			await plugin.generateBundle.handler({}, bundle as any);
-
-			const result = plugin.renderChunk("console.log('test')", {
-				isEntry: true,
-			} as any);
-			new Function((result as any).code)();
+			const injected = (bundle["assets/entry.js"] as Chunk).code;
+			new Function(injected)();
 
 			// Create a problematic element that will cause maybeSetIntegrity to throw
 			const parent: any = Object.create(
