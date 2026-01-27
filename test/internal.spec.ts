@@ -14,6 +14,7 @@ import {
 	IntegrityProcessor,
 	isEligibleForSri,
 	isHttpUrl,
+	joinBaseHref,
 	loadResource,
 	matchesPattern,
 	normalizeBundlePath,
@@ -66,6 +67,56 @@ describe("Internal Utility Functions", () => {
 			expect(normalizeBundlePath("foo")).toBe("foo");
 			expect(normalizeBundlePath("//foo")).toBe("foo");
 			expect(normalizeBundlePath(null)).toBe(null);
+		});
+	});
+
+	describe("joinBaseHref", () => {
+		it("joins https base with chunk file", () => {
+			expect(joinBaseHref("https://cdn.myapp.com/", "assets/chunk.js")).toBe(
+				"https://cdn.myapp.com/assets/chunk.js"
+			);
+		});
+
+		it("adds trailing slash to https base without one", () => {
+			expect(joinBaseHref("https://cdn.myapp.com", "assets/chunk.js")).toBe(
+				"https://cdn.myapp.com/assets/chunk.js"
+			);
+		});
+
+		it("preserves subpath in http base", () => {
+			expect(
+				joinBaseHref("http://cdn.example.com/subpath/", "assets/chunk.js")
+			).toBe("http://cdn.example.com/subpath/assets/chunk.js");
+		});
+
+		it("joins protocol-relative base with chunk file", () => {
+			expect(joinBaseHref("//cdn.example.com/", "chunk.js")).toBe(
+				"//cdn.example.com/chunk.js"
+			);
+		});
+
+		it("adds trailing slash to protocol-relative base without one", () => {
+			expect(joinBaseHref("//cdn.example.com", "chunk.js")).toBe(
+				"//cdn.example.com/chunk.js"
+			);
+		});
+
+		it("falls through to path.posix.join for root path base", () => {
+			expect(joinBaseHref("/", "chunk.js")).toBe("/chunk.js");
+		});
+
+		it("falls through to path.posix.join for subdir base", () => {
+			expect(joinBaseHref("/subdir/", "chunk.js")).toBe("/subdir/chunk.js");
+		});
+
+		it("falls through to path.posix.join for empty base", () => {
+			expect(joinBaseHref("", "chunk.js")).toBe("chunk.js");
+		});
+
+		it("strips leading slash from chunk file with absolute URL base", () => {
+			expect(
+				joinBaseHref("https://cdn.myapp.com/", "/assets/chunk.js")
+			).toBe("https://cdn.myapp.com/assets/chunk.js");
 		});
 	});
 
@@ -1146,6 +1197,80 @@ describe("Processing Classes", () => {
 			expect(html).toContain('href="/assets/chunk.js"');
 			expect(html).toContain('integrity="sha256-abc123"');
 			expect(html).toContain('crossorigin="anonymous"');
+		});
+
+		it("produces correct hrefs with CDN base URL", async () => {
+			const mockLogger = createMockBundleLogger();
+
+			const config = {
+				algorithm: "sha256" as const,
+				crossorigin: "anonymous" as const,
+				base: "https://cdn.myapp.com/",
+				preloadDynamicChunks: true,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+				skipResources: [],
+			};
+
+			const processor = new HtmlProcessor(config);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<html><head></head><body></body></html>",
+				},
+			};
+			const sriByPathname = { "/chunk.js": "sha256-abc123" };
+			const dynamicChunkFiles = new Set(["chunk.js"]);
+
+			await processor.processHtmlFiles(
+				bundle,
+				sriByPathname,
+				dynamicChunkFiles
+			);
+
+			const html = String(bundle["index.html"].source);
+			expect(html).toContain(
+				'href="https://cdn.myapp.com/chunk.js"'
+			);
+			expect(html).not.toContain("https:/cdn");
+		});
+
+		it("produces correct hrefs with protocol-relative base URL", async () => {
+			const mockLogger = createMockBundleLogger();
+
+			const config = {
+				algorithm: "sha256" as const,
+				crossorigin: "anonymous" as const,
+				base: "//cdn.example.com/",
+				preloadDynamicChunks: true,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+				skipResources: [],
+			};
+
+			const processor = new HtmlProcessor(config);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<html><head></head><body></body></html>",
+				},
+			};
+			const sriByPathname = { "/chunk.js": "sha256-abc123" };
+			const dynamicChunkFiles = new Set(["chunk.js"]);
+
+			await processor.processHtmlFiles(
+				bundle,
+				sriByPathname,
+				dynamicChunkFiles
+			);
+
+			const html = String(bundle["index.html"].source);
+			expect(html).toContain(
+				'href="//cdn.example.com/chunk.js"'
+			);
+			expect(html).not.toContain('href="/cdn.example.com');
 		});
 
 		it("skips duplicate preload links", async () => {
