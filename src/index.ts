@@ -182,7 +182,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						sriByPathname = await integrityProcessor.buildIntegrityMappings(bundle);
 					}
 
-					// Step 6: Discover and map dynamic import relationships
+					// Step 3: Discover and map dynamic import relationships
 					logger.info("Analyzing dynamic import relationships");
 					const dynamicImportAnalyzer = new DynamicImportAnalyzer(
 						logger
@@ -190,7 +190,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					dynamicChunkFiles =
 						dynamicImportAnalyzer.analyzeDynamicImports(bundle);
 
-					// Step 7: Process HTML files with comprehensive error handling
+					// Step 4: Process HTML files with comprehensive error handling
 					logger.info("Processing HTML files for SRI injection");
 					const htmlProcessor = new HtmlProcessor({
 						algorithm,
