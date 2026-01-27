@@ -609,11 +609,7 @@ describe("vite-plugin-sri-gen", () => {
 		it("does not inject runtime when disabled", async () => {
 			const plugin = sri({ runtimePatchDynamicLinks: false }) as any;
 			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
-			
-			// renderChunk should always return null now
-			const result = plugin.renderChunk();
-			expect(result).toBeNull();
-			
+
 			// Verify runtime is NOT injected in generateBundle when disabled
 			const bundle: Record<string, Chunk | Asset> = {
 				"index.html": { type: "asset", source: htmlDoc("") },
@@ -1789,7 +1785,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			// info should not be called with step-level messages (they are suppressed)
 			expect(mockContext.info).not.toHaveBeenCalledWith(
-				"Building SRI integrity mappings for bundle assets"
+				"Building SRI integrity mappings for non-entry chunks"
 			);
 			expect(mockContext.info).not.toHaveBeenCalledWith(
 				"Analyzing dynamic import relationships"
@@ -1825,7 +1821,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			// All info messages should be visible in verbose mode
 			expect(mockContext.info).toHaveBeenCalledWith(
-				"Building SRI integrity mappings for bundle assets"
+				"Building SRI integrity mappings for non-entry chunks"
 			);
 			expect(mockContext.info).toHaveBeenCalledWith(
 				"Analyzing dynamic import relationships"
@@ -1861,7 +1857,7 @@ describe("vite-plugin-sri-gen", () => {
 
 			// info suppressed
 			expect(mockContext.info).not.toHaveBeenCalledWith(
-				"Building SRI integrity mappings for bundle assets"
+				"Building SRI integrity mappings for non-entry chunks"
 			);
 
 			// summary always prints
