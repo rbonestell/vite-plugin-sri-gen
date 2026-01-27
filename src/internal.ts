@@ -128,6 +128,34 @@ export function normalizeBundlePath(p: unknown): unknown {
 }
 
 /**
+ * Joins a Vite base path with a chunk filename to produce a correct href.
+ * Uses string concatenation for absolute URL bases (http://, https://, //)
+ * to avoid path.posix.join collapsing the protocol's double slash.
+ * Falls through to path.posix.join for relative/root paths.
+ *
+ * @param base - Vite base config value (URL or path)
+ * @param chunkFile - Relative chunk filename
+ * @returns Properly joined href string
+ *
+ * @example
+ * joinBaseHref("https://cdn.myapp.com/", "assets/chunk.js")
+ * // "https://cdn.myapp.com/assets/chunk.js"
+ *
+ * joinBaseHref("/", "assets/chunk.js")
+ * // "/assets/chunk.js"
+ */
+export function joinBaseHref(base: string, chunkFile: string): string {
+	if (isHttpUrl(base)) {
+		const normalizedBase = base.endsWith("/") ? base : base + "/";
+		const normalizedChunk = chunkFile.startsWith("/")
+			? chunkFile.slice(1)
+			: chunkFile;
+		return normalizedBase + normalizedChunk;
+	}
+	return path.posix.join(base, chunkFile);
+}
+
+/**
  * Generic bundle item type representing either chunks or assets.
  * Used for bundle traversal and resource loading operations.
  */
@@ -1631,7 +1659,7 @@ export class HtmlProcessor {
 		// ========================================================================
 
 		// Build absolute href using base path
-		const href = path.posix.join(this.config.base, chunkFile);
+		const href = joinBaseHref(this.config.base, chunkFile);
 
 		// Check if preload link already exists (duplicate prevention)
 		const existingPreloads = findElements(head, (el) => {

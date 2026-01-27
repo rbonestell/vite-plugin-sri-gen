@@ -483,6 +483,41 @@ describe("vite-plugin-sri-gen", () => {
 			);
 		});
 
+		it("produces correct hrefs with absolute CDN base URL", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				crossorigin: "anonymous",
+			}) as any;
+			plugin.configResolved?.({
+				base: "https://cdn.myapp.com/",
+				build: { ssr: false },
+			} as any);
+
+			const html = htmlDoc(
+				'<script type="module" src="/assets/entry.js"></script>'
+			);
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: html },
+				"assets/entry.js": makeEntryChunk({
+					dynamicImports: ["src/chunkA.ts"],
+				}),
+				"assets/chunk-A.js": makeDynChunk(
+					"assets/chunk-A.js",
+					"src/chunkA.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+			const out = String((bundle["index.html"] as Asset).source);
+
+			// Must preserve full protocol in href
+			expect(out).toMatch(
+				/<link rel="modulepreload" href="https:\/\/cdn\.myapp\.com\/assets\/chunk-A\.js" integrity="sha256-[^"]+" crossorigin="anonymous">/
+			);
+			// Must NOT collapse :// to :/
+			expect(out).not.toContain("https:/cdn");
+		});
+
 		it("does not duplicate existing modulepreload links", async () => {
 			const plugin = sri({ algorithm: "sha256" }) as any;
 			plugin.configResolved?.({
