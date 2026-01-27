@@ -66,6 +66,7 @@ export default {
       fetchCache: true, // cache remote fetches in-memory and dedupe concurrent requests (default: true)
       fetchTimeoutMs: 5000, // abort remote fetches after N ms; 0 disables timeout (default: 5000)
       skipResources: [], // skip SRI for resources matching these patterns (default: [])
+      verboseLogging: true, // show all info-level build logs (default: false)
     }),
   ],
 };
@@ -103,6 +104,7 @@ type SriPluginOptions = {
   preloadDynamicChunks?: boolean; // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks
   runtimePatchDynamicLinks?: boolean; // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
   skipResources?: string[]; // default: []. Skip SRI for resources matching these patterns (by id or src/href)
+  verboseLogging?: boolean; // default: false. Show all info-level build logs. When false, only warnings, errors, and a completion summary are shown.
 };
 ```
 
@@ -115,6 +117,7 @@ Notes:
 - Invalid or unsupported algorithms are automatically replaced with 'sha384' and a warning is logged.
 - Caching: when enabled, remote fetches are cached in-memory per build and concurrent requests are deduplicated.
 - Timeout: when a non-zero fetchTimeoutMs is set, slow remote fetches are aborted and the affected elements are left unchanged (a warning is logged).
+- Logging: by default, the plugin runs quietly — only warnings, errors, and a single completion summary line are printed. Set `verboseLogging: true` to see detailed step-by-step info messages during the build.
 
 ### Skipping Resources
 

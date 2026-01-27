@@ -30,6 +30,8 @@ export interface SriPluginOptions {
 	runtimePatchDynamicLinks?: boolean;
 	/** Skip SRI generation for resources matching these patterns. Supports exact matches and simple glob patterns with '*'. */
 	skipResources?: string[];
+	/** Enable verbose build logging. When false (default), only warnings, errors, and a completion summary are shown. */
+	verboseLogging?: boolean;
 }
 
 let logger: BundleLogger;
@@ -55,6 +57,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 	const preloadDynamicChunks = options.preloadDynamicChunks !== false; // default true
 	const runtimePatchDynamicLinks = options.runtimePatchDynamicLinks !== false; // default true
 	const skipResources = options.skipResources ?? []; // default empty array
+	const verboseLogging = options.verboseLogging === true; // default false
 
 	// Build-time state
 	let base = "/";
@@ -108,7 +111,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 				 */
 
 				// Initialize robust logging system with fallback chain
-				logger = createLogger(this);
+				logger = createLogger(this, verboseLogging);
 
 				try {
 					// Step 1: Validate inputs and early return conditions
@@ -166,7 +169,16 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						dynamicChunkFiles
 					);
 
-					logger.info("SRI generation completed successfully");
+					const assetCount = Object.keys(sriByPathname).length;
+					const htmlCount = Object.values(bundle).filter(
+						(item) =>
+							item.type === "asset" &&
+						typeof item.fileName === "string" &&
+						item.fileName.endsWith(".html")
+					).length;
+					logger.summary(
+						`SRI generation completed: ${assetCount} asset(s) processed, ${htmlCount} HTML file(s) updated`
+					);
 				} catch (error) {
 					handleGenerateBundleError(error, logger);
 					throw error; // Re-throw to maintain error propagation

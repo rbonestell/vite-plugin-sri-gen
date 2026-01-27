@@ -473,21 +473,49 @@ describe("Internal Utility Functions", () => {
 
 describe("Helper Functions", () => {
 	describe("createLogger", () => {
-		it("creates logger with plugin context", () => {
+		it("creates logger with plugin context (verbose)", () => {
+			const mockContext = createMockPluginContext();
+
+			const logger = createLogger(mockContext, true);
+
+			logger.warn("test warning");
+			logger.error("test error");
+			logger.info("test info");
+			logger.summary("test summary");
+
+			expect(mockContext.warn).toHaveBeenCalledWith("test warning");
+			expect(mockContext.info).toHaveBeenCalledWith("test info");
+			expect(mockContext.info).toHaveBeenCalledWith("test summary");
+		});
+
+		it("creates logger with plugin context (quiet)", () => {
+			const mockContext = createMockPluginContext();
+
+			const logger = createLogger(mockContext, false);
+
+			logger.info("should be suppressed");
+			logger.summary("should print");
+
+			expect(mockContext.info).not.toHaveBeenCalledWith("should be suppressed");
+			expect(mockContext.info).toHaveBeenCalledWith("should print");
+		});
+
+		it("defaults to quiet mode when verbose not specified", () => {
 			const mockContext = createMockPluginContext();
 
 			const logger = createLogger(mockContext);
 
-			logger.warn("test warning");
-			logger.error("test error");
+			logger.info("should be suppressed");
+			logger.summary("should print");
 
-			expect(mockContext.warn).toHaveBeenCalledWith("test warning");
+			expect(mockContext.info).not.toHaveBeenCalledWith("should be suppressed");
+			expect(mockContext.info).toHaveBeenCalledWith("should print");
 		});
 
 		it("falls back to console when no plugin context", () => {
 			const { spies, cleanup } = spyOnConsole();
 
-			const logger = createLogger(null);
+			const logger = createLogger(null, false);
 
 			logger.warn("test warning");
 			logger.error("test error");
@@ -503,28 +531,39 @@ describe("Helper Functions", () => {
 			cleanup();
 		});
 
-		it("logs info only in development", () => {
+		it("info is suppressed in quiet console mode but summary prints", () => {
 			const { spies, cleanup } = spyOnConsole();
-			const originalEnv = process.env.NODE_ENV;
 
-			const logger = createLogger(null);
+			const logger = createLogger(null, false);
 
-			// Test in production (default)
-			process.env.NODE_ENV = "production";
-			logger.info("production info");
-			// Info should still be called even in production for this logger implementation
+			logger.info("suppressed info");
+			logger.summary("visible summary");
+
+			expect(spies.info).not.toHaveBeenCalledWith(
+				"[vite-plugin-sri-gen] suppressed info"
+			);
 			expect(spies.info).toHaveBeenCalledWith(
-				"[vite-plugin-sri-gen] production info"
+				"[vite-plugin-sri-gen] visible summary"
 			);
 
-			// Test in development
-			process.env.NODE_ENV = "development";
-			logger.info("development info");
+			cleanup();
+		});
+
+		it("info prints in verbose console mode", () => {
+			const { spies, cleanup } = spyOnConsole();
+
+			const logger = createLogger(null, true);
+
+			logger.info("verbose info");
+			logger.summary("verbose summary");
+
 			expect(spies.info).toHaveBeenCalledWith(
-				"[vite-plugin-sri-gen] development info"
+				"[vite-plugin-sri-gen] verbose info"
+			);
+			expect(spies.info).toHaveBeenCalledWith(
+				"[vite-plugin-sri-gen] verbose summary"
 			);
 
-			process.env.NODE_ENV = originalEnv;
 			cleanup();
 		});
 	});
@@ -1580,7 +1619,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 	describe("handleGenerateBundleError", () => {
 		it("logs error with stack trace", () => {
-			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 			const error = new Error("Test error");
 
 			handleGenerateBundleError(error, mockLogger);
@@ -1592,7 +1631,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("logs error without stack trace", () => {
-			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 			const errorLike = { message: "Test error" };
 
 			handleGenerateBundleError(errorLike, mockLogger);
@@ -1604,7 +1643,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("handles string errors", () => {
-			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 
 			handleGenerateBundleError("String error", mockLogger);
 
@@ -1615,7 +1654,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 		});
 
 		it("handles null/undefined errors", () => {
-			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 
 			handleGenerateBundleError(null, mockLogger);
 
@@ -1627,22 +1666,40 @@ describe("Additional Edge Cases and Error Paths", () => {
 	});
 
 	describe("createLogger edge cases", () => {
-		it("uses plugin context methods when available", () => {
+		it("uses plugin context methods when available (verbose)", () => {
 			const mockContext = {
 				info: vi.fn(),
 				warn: vi.fn(),
 				error: vi.fn(),
 			};
 
-			const logger = createLogger(mockContext);
+			const logger = createLogger(mockContext, true);
 
 			logger.info("test info");
 			logger.warn("test warn");
 			logger.error("test error");
+			logger.summary("test summary");
 
 			expect(mockContext.info).toHaveBeenCalledWith("test info");
 			expect(mockContext.warn).toHaveBeenCalledWith("test warn");
 			expect(mockContext.error).toHaveBeenCalledWith("test error");
+			expect(mockContext.info).toHaveBeenCalledWith("test summary");
+		});
+
+		it("suppresses info in quiet mode but summary still prints", () => {
+			const mockContext = {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+			};
+
+			const logger = createLogger(mockContext, false);
+
+			logger.info("suppressed");
+			logger.summary("visible");
+
+			expect(mockContext.info).not.toHaveBeenCalledWith("suppressed");
+			expect(mockContext.info).toHaveBeenCalledWith("visible");
 		});
 
 		it("falls back to console when no plugin context", () => {
@@ -1657,19 +1714,26 @@ describe("Additional Edge Cases and Error Paths", () => {
 				.mockImplementation(() => {});
 
 			try {
-				const logger = createLogger(null);
+				const logger = createLogger(null, true);
 
 				logger.info("test info");
 				logger.warn("test warn");
 				logger.error("test error");
+				logger.summary("test summary");
 
 				// Logger adds [vite-plugin-sri-gen] prefix
+				expect(consoleSpy).toHaveBeenCalledWith(
+					"[vite-plugin-sri-gen] test info"
+				);
 				expect(warnSpy).toHaveBeenCalledWith(
 					"[vite-plugin-sri-gen] test warn"
 				);
 				expect(errorSpy).toHaveBeenCalledWith(
 					"[vite-plugin-sri-gen] test error",
 					undefined
+				);
+				expect(consoleSpy).toHaveBeenCalledWith(
+					"[vite-plugin-sri-gen] test summary"
 				);
 			} finally {
 				consoleSpy.mockRestore();
@@ -1686,12 +1750,13 @@ describe("Additional Edge Cases and Error Paths", () => {
 				logger.info("test");
 				logger.warn("test");
 				logger.error("test");
+				logger.summary("test");
 			}).not.toThrow();
 		});
 	});
 
 	describe("addSriToHtml edge cases", () => {
-		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 
 		beforeEach(() => {
 			mockLogger.info.mockClear();
@@ -1811,7 +1876,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 	});
 
 	describe("Integration error scenarios", () => {
-		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
 
 		beforeEach(() => {
 			mockLogger.info.mockClear();

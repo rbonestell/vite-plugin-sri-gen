@@ -9,6 +9,7 @@ export interface MockBundleLogger extends BundleLogger {
 	info: MockedFunction<(message: string) => void>;
 	warn: MockedFunction<(message: string) => void>;
 	error: MockedFunction<(message: string, error?: Error) => void>;
+	summary: MockedFunction<(message: string) => void>;
 }
 
 /**
@@ -19,6 +20,7 @@ export function createMockBundleLogger(): MockBundleLogger {
 		info: vi.fn(),
 		warn: vi.fn(),
 		error: vi.fn(),
+		summary: vi.fn(),
 	};
 }
 

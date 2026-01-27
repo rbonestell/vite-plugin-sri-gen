@@ -29,6 +29,8 @@ export interface BundleLogger {
 	warn(message: string): void;
 	/** Log error messages with optional Error object for detailed stack traces */
 	error(message: string, error?: Error): void;
+	/** Always prints regardless of verboseLogging setting — used for the final completion summary */
+	summary(message: string): void;
 }
 
 /**
@@ -689,20 +691,23 @@ export async function addSriToHtml(
  * @param pluginContext - The plugin context (this) from the plugin function
  * @returns Logger interface with info, warn, and error methods
  */
-export function createLogger(pluginContext: any): BundleLogger {
+export function createLogger(pluginContext: any, verbose: boolean = false): BundleLogger {
 	if (pluginContext && typeof pluginContext.warn === "function") {
 		return {
 			warn: pluginContext.warn.bind(pluginContext),
-			info: pluginContext.info.bind(pluginContext),
+			info: verbose ? pluginContext.info.bind(pluginContext) : () => {},
 			error: pluginContext.error.bind(pluginContext),
+			summary: pluginContext.info.bind(pluginContext),
 		} as BundleLogger;
 	} else {
+		const infoFn = (msg: string) => console.info(`[vite-plugin-sri-gen] ${msg}`);
 		return {
 			warn: (msg: string) => console.warn(`[vite-plugin-sri-gen] ${msg}`),
-			info: (msg: string) => console.info(`[vite-plugin-sri-gen] ${msg}`),
+			info: verbose ? infoFn : () => {},
 			error: (msg: string, error?: Error) => {
 				console.error(`[vite-plugin-sri-gen] ${msg}`, error);
 			},
+			summary: infoFn,
 		} as BundleLogger;
 	}
 }
