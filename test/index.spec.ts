@@ -483,6 +483,41 @@ describe("vite-plugin-sri-gen", () => {
 			);
 		});
 
+		it("produces correct hrefs with absolute CDN base URL", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				crossorigin: "anonymous",
+			}) as any;
+			plugin.configResolved?.({
+				base: "https://cdn.myapp.com/",
+				build: { ssr: false },
+			} as any);
+
+			const html = htmlDoc(
+				'<script type="module" src="/assets/entry.js"></script>'
+			);
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: html },
+				"assets/entry.js": makeEntryChunk({
+					dynamicImports: ["src/chunkA.ts"],
+				}),
+				"assets/chunk-A.js": makeDynChunk(
+					"assets/chunk-A.js",
+					"src/chunkA.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+			const out = String((bundle["index.html"] as Asset).source);
+
+			// Must preserve full protocol in href
+			expect(out).toMatch(
+				/<link rel="modulepreload" href="https:\/\/cdn\.myapp\.com\/assets\/chunk-A\.js" integrity="sha256-[^"]+" crossorigin="anonymous">/
+			);
+			// Must NOT collapse :// to :/
+			expect(out).not.toContain("https:/cdn");
+		});
+
 		it("does not duplicate existing modulepreload links", async () => {
 			const plugin = sri({ algorithm: "sha256" }) as any;
 			plugin.configResolved?.({
@@ -1078,10 +1113,8 @@ describe("vite-plugin-sri-gen", () => {
 			cleanup();
 		});
 
-		it("covers successful completion info logging in development", async () => {
+		it("covers successful completion summary logging", async () => {
 			const { spies, cleanup } = spyOnConsole();
-			const originalEnv = process.env.NODE_ENV;
-			process.env.NODE_ENV = "development";
 
 			const plugin = sri() as any;
 
@@ -1089,6 +1122,7 @@ describe("vite-plugin-sri-gen", () => {
 				"index.html": {
 					type: "asset",
 					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
 				},
 				"main.js": {
 					type: "chunk",
@@ -1099,15 +1133,43 @@ describe("vite-plugin-sri-gen", () => {
 
 			await plugin.generateBundle.handler({}, bundle);
 
-			// Should log all info messages including completion
+			// Default (quiet) mode: info is suppressed, but summary always prints
+			expect(spies.info).toHaveBeenCalledWith(
+				expect.stringContaining("SRI generation completed")
+			);
+
+			cleanup();
+		});
+
+		it("covers verbose logging shows all info messages", async () => {
+			const { spies, cleanup } = spyOnConsole();
+
+			const plugin = sri({ verboseLogging: true }) as any;
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
+				},
+				"main.js": {
+					type: "chunk",
+					fileName: "main.js",
+					code: "console.log('test');",
+				},
+			};
+
+			await plugin.generateBundle.handler({}, bundle);
+
+			// Verbose mode: info messages are visible
 			expect(spies.info).toHaveBeenCalledWith(
 				expect.stringContaining("Building SRI integrity mappings")
 			);
+			// Summary always prints
 			expect(spies.info).toHaveBeenCalledWith(
-				expect.stringContaining("SRI generation completed successfully")
+				expect.stringContaining("SRI generation completed")
 			);
 
-			process.env.NODE_ENV = originalEnv;
 			cleanup();
 		});
 
@@ -1133,16 +1195,15 @@ describe("vite-plugin-sri-gen", () => {
 			expect(result).toBeUndefined();
 		});
 
-		it("covers production mode (no info logging)", async () => {
+		it("covers default quiet mode (summary still prints)", async () => {
 			const { spies, cleanup } = spyOnConsole();
-			const originalEnv = process.env.NODE_ENV;
-			process.env.NODE_ENV = "production";
 
 			const plugin = sri() as any;
 			const bundle: any = {
 				"index.html": {
 					type: "asset",
 					source: "<!DOCTYPE html><html></html>",
+					fileName: "index.html",
 				},
 				"test.js": {
 					type: "chunk",
@@ -1153,10 +1214,11 @@ describe("vite-plugin-sri-gen", () => {
 
 			await plugin.generateBundle.handler({}, bundle);
 
-			// In production, info is still logged by the BundleLogger implementation
-			expect(spies.info).toHaveBeenCalled();
+			// In default quiet mode, summary still prints via console.info
+			expect(spies.info).toHaveBeenCalledWith(
+				expect.stringContaining("SRI generation completed")
+			);
 
-			process.env.NODE_ENV = originalEnv;
 			cleanup();
 		});
 
@@ -1709,6 +1771,167 @@ describe("vite-plugin-sri-gen", () => {
 					dependencies
 				);
 			}).not.toThrow();
+		});
+	});
+
+	describe("verboseLogging Option", () => {
+		it("suppresses info logs in default (quiet) mode", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri() as any;
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
+				},
+				"main.js": {
+					type: "chunk",
+					fileName: "main.js",
+					code: "console.log('test');",
+				},
+			};
+
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			// info should not be called with step-level messages (they are suppressed)
+			expect(mockContext.info).not.toHaveBeenCalledWith(
+				"Building SRI integrity mappings for bundle assets"
+			);
+			expect(mockContext.info).not.toHaveBeenCalledWith(
+				"Analyzing dynamic import relationships"
+			);
+			expect(mockContext.info).not.toHaveBeenCalledWith(
+				"Processing HTML files for SRI injection"
+			);
+
+			// summary always prints via info
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("SRI generation completed")
+			);
+		});
+
+		it("shows all info logs when verboseLogging is true", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri({ verboseLogging: true }) as any;
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
+				},
+				"main.js": {
+					type: "chunk",
+					fileName: "main.js",
+					code: "console.log('test');",
+				},
+			};
+
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			// All info messages should be visible in verbose mode
+			expect(mockContext.info).toHaveBeenCalledWith(
+				"Building SRI integrity mappings for bundle assets"
+			);
+			expect(mockContext.info).toHaveBeenCalledWith(
+				"Analyzing dynamic import relationships"
+			);
+			expect(mockContext.info).toHaveBeenCalledWith(
+				"Processing HTML files for SRI injection"
+			);
+
+			// summary always prints
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("SRI generation completed")
+			);
+		});
+
+		it("explicit verboseLogging: false behaves same as default", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri({ verboseLogging: false }) as any;
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
+				},
+				"main.js": {
+					type: "chunk",
+					fileName: "main.js",
+					code: "console.log('test');",
+				},
+			};
+
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			// info suppressed
+			expect(mockContext.info).not.toHaveBeenCalledWith(
+				"Building SRI integrity mappings for bundle assets"
+			);
+
+			// summary always prints
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("SRI generation completed")
+			);
+		});
+
+		it("warnings still print in quiet mode", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri() as any;
+
+			// Simulate SSR build with no HTML to trigger a warning
+			plugin.configResolved?.({
+				command: "build",
+				mode: "production",
+				appType: "ssr",
+				build: { ssr: true },
+			} as any);
+
+			const bundle: any = { "entry.js": { code: "console.log(1)" } };
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			// warn is always called regardless of verbose setting
+			expect(mockContext.warn).toHaveBeenCalled();
+		});
+
+		it("summary includes asset and HTML counts", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri() as any;
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "index.html",
+				},
+				"about.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html><head></head><body></body></html>",
+					fileName: "about.html",
+				},
+				"main.js": {
+					type: "chunk",
+					fileName: "main.js",
+					code: "console.log('test');",
+				},
+				"style.css": {
+					type: "asset",
+					fileName: "style.css",
+					source: "body{}",
+				},
+			};
+
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			// Summary should mention asset and HTML counts
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("asset(s) processed")
+			);
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("HTML file(s) updated")
+			);
 		});
 	});
 });

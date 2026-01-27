@@ -9,3 +9,8 @@ charset = utf-8
 [*.{json,js,jsx,ts,tsx,mjs,cjs}]
 indent_style = tab
 indent_size = 4
+
+
+[*.{yaml,yml}]
+indent_style = space
+indent_size = 2

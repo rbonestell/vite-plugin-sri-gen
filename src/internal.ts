@@ -29,6 +29,8 @@ export interface BundleLogger {
 	warn(message: string): void;
 	/** Log error messages with optional Error object for detailed stack traces */
 	error(message: string, error?: Error): void;
+	/** Always prints regardless of verboseLogging setting — used for the final completion summary */
+	summary(message: string): void;
 }
 
 /**
@@ -123,6 +125,34 @@ export function normalizeBundlePath(p: unknown): unknown {
 	// Strip leading ./ (relative path prefix)
 	if (p.startsWith("./")) return p.slice(2);
 	return p;
+}
+
+/**
+ * Joins a Vite base path with a chunk filename to produce a correct href.
+ * Uses string concatenation for absolute URL bases (http://, https://, //)
+ * to avoid path.posix.join collapsing the protocol's double slash.
+ * Falls through to path.posix.join for relative/root paths.
+ *
+ * @param base - Vite base config value (URL or path)
+ * @param chunkFile - Relative chunk filename
+ * @returns Properly joined href string
+ *
+ * @example
+ * joinBaseHref("https://cdn.myapp.com/", "assets/chunk.js")
+ * // "https://cdn.myapp.com/assets/chunk.js"
+ *
+ * joinBaseHref("/", "assets/chunk.js")
+ * // "/assets/chunk.js"
+ */
+export function joinBaseHref(base: string, chunkFile: string): string {
+	if (isHttpUrl(base)) {
+		const normalizedBase = base.endsWith("/") ? base : base + "/";
+		const normalizedChunk = chunkFile.startsWith("/")
+			? chunkFile.slice(1)
+			: chunkFile;
+		return normalizedBase + normalizedChunk;
+	}
+	return path.posix.join(base, chunkFile);
 }
 
 /**
@@ -689,20 +719,23 @@ export async function addSriToHtml(
  * @param pluginContext - The plugin context (this) from the plugin function
  * @returns Logger interface with info, warn, and error methods
  */
-export function createLogger(pluginContext: any): BundleLogger {
+export function createLogger(pluginContext: any, verbose: boolean = false): BundleLogger {
 	if (pluginContext && typeof pluginContext.warn === "function") {
 		return {
 			warn: pluginContext.warn.bind(pluginContext),
-			info: pluginContext.info.bind(pluginContext),
+			info: verbose ? pluginContext.info.bind(pluginContext) : () => {},
 			error: pluginContext.error.bind(pluginContext),
+			summary: pluginContext.info.bind(pluginContext),
 		} as BundleLogger;
 	} else {
+		const infoFn = (msg: string) => console.info(`[vite-plugin-sri-gen] ${msg}`);
 		return {
 			warn: (msg: string) => console.warn(`[vite-plugin-sri-gen] ${msg}`),
-			info: (msg: string) => console.info(`[vite-plugin-sri-gen] ${msg}`),
+			info: verbose ? infoFn : () => {},
 			error: (msg: string, error?: Error) => {
 				console.error(`[vite-plugin-sri-gen] ${msg}`, error);
 			},
+			summary: infoFn,
 		} as BundleLogger;
 	}
 }
@@ -1662,7 +1695,7 @@ export class HtmlProcessor {
 		// ========================================================================
 
 		// Build absolute href using base path
-		const href = path.posix.join(this.config.base, chunkFile);
+		const href = joinBaseHref(this.config.base, chunkFile);
 
 		// Check if preload link already exists (duplicate prevention)
 		const existingPreloads = findElements(head, (el) => {
