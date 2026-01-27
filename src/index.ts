@@ -129,16 +129,58 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						return;
 					}
 
-					// Step 2: Build comprehensive integrity mappings for all assets
-					logger.info(
-						"Building SRI integrity mappings for bundle assets"
-					);
 					const integrityProcessor = new IntegrityProcessor(
 						algorithm,
 						logger
 					);
-					sriByPathname =
-						await integrityProcessor.buildIntegrityMappings(bundle);
+
+					// Two-pass vs single-pass hashing:
+					// - When runtimePatchDynamicLinks is enabled, we need two passes:
+					//   1) Hash non-entry chunks first (their hashes go into the runtime)
+					//   2) Inject runtime into entry chunks
+					//   3) Hash entry chunks (now includes the injected runtime)
+					// - When disabled, we can hash everything in a single pass for efficiency
+					if (runtimePatchDynamicLinks) {
+						// Step 2a: Compute hashes for NON-ENTRY chunks first
+						// These hashes will be embedded in the runtime injected into entry chunks
+						logger.info(
+							"Building SRI integrity mappings for non-entry chunks"
+						);
+						const nonEntryHashes =
+							await integrityProcessor.buildIntegrityMappings(bundle, { excludeEntryChunks: true });
+
+						// Step 2b: Inject runtime into entry chunks (BEFORE hashing entry chunks)
+						// The runtime contains hashes for dynamic chunks so they can be verified at load time
+						logger.info("Injecting SRI runtime into entry chunks");
+						const serializedMap = JSON.stringify(nonEntryHashes);
+						const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
+						const serializedSkipPatterns = JSON.stringify(skipResources);
+						const runtimeCode = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns} });\n`;
+
+						for (const [fileName, bundleItem] of Object.entries(bundle)) {
+							if (bundleItem.type === "chunk" && bundleItem.isEntry) {
+								bundleItem.code = runtimeCode + bundleItem.code;
+								logger.info(`Injected SRI runtime into entry chunk: ${fileName}`);
+							}
+						}
+
+						// Step 2c: NOW compute hashes for entry chunks (after runtime injection)
+						// This ensures the entry chunk hash includes the injected runtime code
+						logger.info(
+							"Building SRI integrity mappings for entry chunks (post-injection)"
+						);
+						const entryHashes =
+							await integrityProcessor.buildIntegrityMappings(bundle, { onlyEntryChunks: true });
+
+						// Merge all hashes into the final map
+						sriByPathname = { ...nonEntryHashes, ...entryHashes };
+					} else {
+						// Step 2 (single-pass): No runtime injection, hash all chunks at once
+						logger.info(
+							"Building SRI integrity mappings for all chunks (no runtime injection)"
+						);
+						sriByPathname = await integrityProcessor.buildIntegrityMappings(bundle);
+					}
 
 					// Step 3: Discover and map dynamic import relationships
 					logger.info("Analyzing dynamic import relationships");
@@ -184,22 +226,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					throw error; // Re-throw to maintain error propagation
 				}
 			},
-		},
-
-		// Prepend a tiny runtime to entry chunks to set integrity on dynamic <link>/<script>
-		renderChunk(
-			code: string,
-			chunk: any
-		): { code: string; map: null } | null {
-			if (!runtimePatchDynamicLinks) return null;
-			if (!(chunk as any).isEntry) return null;
-
-			const serializedMap = JSON.stringify(sriByPathname);
-			const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
-			const serializedSkipPatterns = JSON.stringify(skipResources);
-			const injected = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns} });\n`;
-			return { code: injected + code, map: null };
-		},
+		}
 	};
 
 	return plugin;

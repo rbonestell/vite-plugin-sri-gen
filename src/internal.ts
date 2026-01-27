@@ -936,18 +936,37 @@ export class IntegrityProcessor {
 	 * 4. Log processing summary
 	 *
 	 * @param bundle - Output bundle containing assets and chunks
+	 * @param options - Optional filtering options for chunk processing
+	 * @param options.excludeEntryChunks - If true, skip entry chunks (for first-pass hashing)
+	 * @param options.onlyEntryChunks - If true, only process entry chunks (for post-injection hashing)
 	 * @returns Promise<Record<string, string>> - Mapping of pathname to integrity hash
 	 */
 	async buildIntegrityMappings(
-		bundle: OutputBundle
+		bundle: OutputBundle,
+		options?: { excludeEntryChunks?: boolean; onlyEntryChunks?: boolean }
 	): Promise<Record<string, string>> {
 		const integrityMap: Record<string, string> = {};
 		const bundleEntries = Object.entries(bundle);
 		let processedCount = 0;
 		let skippedCount = 0;
 
+		const excludeEntryChunks = options?.excludeEntryChunks ?? false;
+		const onlyEntryChunks = options?.onlyEntryChunks ?? false;
+
+		if (excludeEntryChunks && onlyEntryChunks) {
+			throw new Error(
+				"Invalid integrity mapping options: 'excludeEntryChunks' and 'onlyEntryChunks' cannot both be true."
+			);
+		}
+
+		const filterDescription = excludeEntryChunks
+			? "non-entry chunks and assets"
+			: onlyEntryChunks
+				? "entry chunks only"
+				: "all bundle assets";
+
 		this.logger.info(
-			`Processing ${bundleEntries.length} bundle entries for integrity computation`
+			`Processing ${bundleEntries.length} bundle entries for integrity computation (${filterDescription})`
 		);
 
 		// ========================================================================
@@ -958,6 +977,23 @@ export class IntegrityProcessor {
 		const processingPromises = bundleEntries.map(
 			async ([fileName, bundleItem]) => {
 				try {
+					// Apply entry chunk filtering based on options
+					if (bundleItem.type === "chunk") {
+						const isEntry = (bundleItem as OutputChunk).isEntry;
+						if (excludeEntryChunks && isEntry) {
+							skippedCount++;
+							return; // Skip entry chunks in first pass
+						}
+						if (onlyEntryChunks && !isEntry) {
+							skippedCount++;
+							return; // Skip non-entry chunks in second pass
+						}
+					} else if (onlyEntryChunks) {
+						// When only processing entry chunks, skip all assets
+						skippedCount++;
+						return;
+					}
+
 					const result = await this.processBundleItem(
 						fileName,
 						bundleItem

@@ -868,6 +868,23 @@ describe("Processing Classes", () => {
 			expect(result["/test.css"]).toMatch(/^sha256-/);
 		});
 
+		it("throws when both excludeEntryChunks and onlyEntryChunks are true", async () => {
+			const mockLogger = createMockBundleLogger();
+			const processor = new IntegrityProcessor("sha256", mockLogger);
+			const bundle: any = {
+				"test.js": { type: "chunk", code: "console.log('test')" },
+			};
+
+			await expect(
+				processor.buildIntegrityMappings(bundle, {
+					excludeEntryChunks: true,
+					onlyEntryChunks: true,
+				})
+			).rejects.toThrow(
+				"Invalid integrity mapping options: 'excludeEntryChunks' and 'onlyEntryChunks' cannot both be true."
+			);
+		});
+
 		it("handles bundle items with missing content", async () => {
 			const mockLogger = createMockBundleLogger();
 
