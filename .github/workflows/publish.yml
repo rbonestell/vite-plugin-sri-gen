@@ -14,7 +14,7 @@ jobs:
           ref: main
       - uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - name: Update version from release tag
         env:
