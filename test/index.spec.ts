@@ -625,13 +625,6 @@ describe("vite-plugin-sri-gen", () => {
 			expect(entryCode).not.toContain("installSriRuntime");
 		});
 
-		it("renderChunk returns null for all chunks (injection moved to generateBundle)", () => {
-			const plugin = sri() as any;
-			// renderChunk now always returns null since injection moved to generateBundle
-			const result = plugin.renderChunk();
-			expect(result).toBeNull();
-		});
-
 		it("maps dynamic import via chunk name when facadeModuleId missing and joins base correctly", async () => {
 			const plugin = sri({
 				algorithm: "sha256",

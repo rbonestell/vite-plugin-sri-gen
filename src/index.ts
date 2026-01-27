@@ -226,13 +226,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					throw error; // Re-throw to maintain error propagation
 				}
 			},
-		},
-
-		// renderChunk is intentionally disabled - runtime injection was moved to generateBundle
-		// so that entry chunk hashes are computed after runtime injection, not before.
-		renderChunk(): null {
-			return null;
-		},
+		}
 	};
 
 	return plugin;
