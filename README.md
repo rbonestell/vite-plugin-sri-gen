@@ -9,8 +9,8 @@
 <a href="https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/build.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/build.yml?logo=typescript&logoColor=white" alt="Build Status"></a>
 <a href="https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests" alt="Test Results"></a>
 <a href="https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/"><img src="https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white" alt="Code Coverage"></a>
-<a href="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen"><img src="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen/badge.svg" alt="Known Vulnerabilities"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+<a href="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen"><img src="https://img.shields.io/badge/security-monitored-8A2BE2?logo=snyk" alt="Known Vulnerabilities"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3DA639?logo=opensourceinitiative&logoColor=white" alt="License"></a>
 </p>
 
 # vite-plugin-sri-gen
