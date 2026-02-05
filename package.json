@@ -13,6 +13,7 @@
 	"scripts": {
 		"build": "tsup",
 		"clean": "rimraf dist",
+		"prepare": "npm run build",
 		"prepublishOnly": "npm run build",
 		"test": "vitest",
 		"test:cov": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=lcov",
