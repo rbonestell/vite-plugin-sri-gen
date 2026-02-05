@@ -7,6 +7,7 @@ import {
 	computeIntegrity,
 	createLogger,
 	DynamicImportAnalyzer,
+	extractPathnameFromResourceUrl,
 	getUrlAttrName,
 	handleGenerateBundleError,
 	HtmlProcessor,
@@ -117,6 +118,71 @@ describe("Internal Utility Functions", () => {
 			expect(
 				joinBaseHref("https://cdn.myapp.com/", "/assets/chunk.js")
 			).toBe("https://cdn.myapp.com/assets/chunk.js");
+		});
+	});
+
+	describe("extractPathnameFromResourceUrl", () => {
+		it("extracts pathname from absolute HTTPS URL", () => {
+			expect(
+				extractPathnameFromResourceUrl(
+					"https://cdn.example.com/assets/main.js",
+					"https://cdn.example.com/"
+				)
+			).toBe("/assets/main.js");
+		});
+
+		it("extracts pathname from absolute HTTP URL with subpath", () => {
+			expect(
+				extractPathnameFromResourceUrl(
+					"http://cdn.example.com/subpath/assets/chunk.js",
+					"http://cdn.example.com/subpath/"
+				)
+			).toBe("/subpath/assets/chunk.js");
+		});
+
+		it("extracts pathname from protocol-relative URL", () => {
+			expect(
+				extractPathnameFromResourceUrl(
+					"//cdn.example.com/assets/main.js",
+					"//cdn.example.com/"
+				)
+			).toBe("/assets/main.js");
+		});
+
+		it("handles root-relative URLs", () => {
+			expect(extractPathnameFromResourceUrl("/assets/main.js", "/")).toBe(
+				"/assets/main.js"
+			);
+		});
+
+		it("handles relative URLs without leading slash", () => {
+			expect(extractPathnameFromResourceUrl("assets/main.js", "/")).toBe(
+				"/assets/main.js"
+			);
+		});
+
+		it("handles relative URLs with ./", () => {
+			expect(extractPathnameFromResourceUrl("./assets/main.js", "/")).toBe(
+				"/assets/main.js"
+			);
+		});
+
+		it("handles URL with query string", () => {
+			expect(
+				extractPathnameFromResourceUrl(
+					"https://cdn.example.com/assets/main.js?v=123",
+					"https://cdn.example.com/"
+				)
+			).toBe("/assets/main.js");
+		});
+
+		it("handles URL with hash", () => {
+			expect(
+				extractPathnameFromResourceUrl(
+					"https://cdn.example.com/assets/main.js#section",
+					"https://cdn.example.com/"
+				)
+			).toBe("/assets/main.js");
 		});
 	});
 
@@ -468,6 +534,74 @@ describe("Internal Utility Functions", () => {
 			await processElement(element, bundle, "sha256");
 
 			expect(getAttrValue(element, "integrity")).toBeUndefined();
+		});
+
+		it("finds pre-computed hash for script with absolute CDN URL", async () => {
+			const element = createTestElement("script", [
+				{ name: "src", value: "https://cdn.example.com/assets/main.js" },
+			]);
+			const bundle = mockBundle({});
+			const preComputedHashes = { "/assets/main.js": "sha256-testHash123" };
+
+			await processElement(
+				element,
+				bundle,
+				"sha256",
+				"anonymous",
+				undefined,
+				preComputedHashes,
+				"https://cdn.example.com/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe("sha256-testHash123");
+			expect(getAttrValue(element, "crossorigin")).toBe("anonymous");
+		});
+
+		it("finds pre-computed hash for link with protocol-relative CDN URL", async () => {
+			const element = createTestElement("link", [
+				{ name: "rel", value: "stylesheet" },
+				{ name: "href", value: "//cdn.example.com/assets/style.css" },
+			]);
+			const bundle = mockBundle({});
+			const preComputedHashes = { "/assets/style.css": "sha384-cssHash" };
+
+			await processElement(
+				element,
+				bundle,
+				"sha384",
+				"anonymous",
+				undefined,
+				preComputedHashes,
+				"//cdn.example.com/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe("sha384-cssHash");
+			expect(getAttrValue(element, "crossorigin")).toBe("anonymous");
+		});
+
+		it("finds pre-computed hash for script with subpath in CDN URL", async () => {
+			const element = createTestElement("script", [
+				{
+					name: "src",
+					value: "https://cdn.example.com/app/v2/assets/bundle.js",
+				},
+			]);
+			const bundle = mockBundle({});
+			const preComputedHashes = {
+				"/app/v2/assets/bundle.js": "sha512-bundleHash",
+			};
+
+			await processElement(
+				element,
+				bundle,
+				"sha512",
+				undefined,
+				undefined,
+				preComputedHashes,
+				"https://cdn.example.com/app/v2/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe("sha512-bundleHash");
 		});
 	});
 
