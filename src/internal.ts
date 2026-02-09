@@ -156,6 +156,49 @@ export function joinBaseHref(base: string, chunkFile: string): string {
 }
 
 /**
+ * Extracts the pathname from a resource URL, handling absolute CDN URLs.
+ * When the resource URL is an absolute HTTP/HTTPS URL, extracts just the pathname
+ * portion for hash lookup. For relative or root-relative URLs, normalizes them
+ * to have a leading slash.
+ *
+ * @param resourceUrl - The resource URL from HTML element (src/href attribute)
+ * @param _base - The Vite base config value (reserved for future use)
+ * @returns The pathname suitable for hash lookup (e.g., "/assets/main.js")
+ *
+ * @example
+ * extractPathnameFromResourceUrl("https://cdn.example.com/assets/main.js", "https://cdn.example.com/")
+ * // returns "/assets/main.js"
+ *
+ * extractPathnameFromResourceUrl("/assets/main.js", "/")
+ * // returns "/assets/main.js"
+ *
+ * extractPathnameFromResourceUrl("assets/main.js", "/")
+ * // returns "/assets/main.js"
+ */
+export function extractPathnameFromResourceUrl(
+	resourceUrl: string,
+	_base: string
+): string {
+	// Handle absolute HTTP/HTTPS and protocol-relative URLs
+	if (isHttpUrl(resourceUrl)) {
+		try {
+			// For protocol-relative URLs, prepend https: for URL parsing
+			const urlToParse = resourceUrl.startsWith("//")
+				? `https:${resourceUrl}`
+				: resourceUrl;
+			const url = new URL(urlToParse);
+			return url.pathname;
+		} catch {
+			// If URL parsing fails, fall through to normalization
+		}
+	}
+
+	// For relative or root-relative URLs, normalize and ensure leading slash
+	const normalized = normalizeBundlePath(resourceUrl) as string;
+	return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+/**
  * Generic bundle item type representing either chunks or assets.
  * Used for bundle traversal and resource loading operations.
  */
@@ -524,6 +567,7 @@ function setAttrValue(element: Element, name: string, value: string): void {
  * @param crossorigin - CORS setting to apply
  * @param resourceOpts - Resource loading configuration
  * @param preComputedHashes - Optional pre-computed integrity hashes by pathname
+ * @param base - Vite base config value for resolving absolute CDN URLs
  */
 export async function processElement(
 	element: Element,
@@ -531,7 +575,8 @@ export async function processElement(
 	algorithm: "sha256" | "sha384" | "sha512",
 	crossorigin?: "anonymous" | "use-credentials",
 	resourceOpts?: LoadResourceOptions,
-	preComputedHashes?: Record<string, string>
+	preComputedHashes?: Record<string, string>,
+	base: string = "/"
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
@@ -545,14 +590,18 @@ export async function processElement(
 	// Check for pre-computed integrity hash first
 	let integrity: string | undefined;
 	if (preComputedHashes && resourcePath) {
+		// Extract pathname from resource URL (handles absolute CDN URLs)
+		const pathname = extractPathnameFromResourceUrl(resourcePath, base);
+
 		// Try to find a matching pre-computed hash
-		// Check exact match first, then try with leading slash
-		const normalizedResourcePath: string = normalizeBundlePath(
-			resourcePath
-		) as string;
-		integrity =
-			preComputedHashes[normalizedResourcePath] ||
-			preComputedHashes[`/${normalizedResourcePath}`];
+		// Check exact pathname first, then try normalized versions
+		integrity = preComputedHashes[pathname];
+		if (!integrity) {
+			const normalizedPath = normalizeBundlePath(pathname) as string;
+			integrity =
+				preComputedHashes[normalizedPath] ||
+				preComputedHashes[`/${normalizedPath}`];
+		}
 	}
 
 	// If no pre-computed hash found, compute it the traditional way
@@ -643,12 +692,14 @@ export async function addSriToHtml(
 		resourceOpts,
 		skipResources = [],
 		preComputedHashes,
+		base = "/",
 	}: {
 		algorithm?: "sha256" | "sha384" | "sha512";
 		crossorigin?: "anonymous" | "use-credentials";
 		resourceOpts?: LoadResourceOptions;
 		skipResources?: string[];
 		preComputedHashes?: Record<string, string>;
+		base?: string;
 	} = {}
 ): Promise<string> {
 	try {
@@ -671,7 +722,8 @@ export async function addSriToHtml(
 					algorithm,
 					crossorigin,
 					resourceOpts,
-					preComputedHashes
+					preComputedHashes,
+					base
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
 					const src =
@@ -1585,6 +1637,7 @@ export class HtmlProcessor {
 			},
 			skipResources: this.config.skipResources,
 			preComputedHashes: sriByPathname,
+			base: this.config.base,
 		});
 	}
 
