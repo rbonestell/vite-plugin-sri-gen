@@ -125,8 +125,7 @@ describe("Internal Utility Functions", () => {
 		it("extracts pathname from absolute HTTPS URL", () => {
 			expect(
 				extractPathnameFromResourceUrl(
-					"https://cdn.example.com/assets/main.js",
-					"https://cdn.example.com/"
+					"https://cdn.example.com/assets/main.js"
 				)
 			).toBe("/assets/main.js");
 		});
@@ -134,8 +133,7 @@ describe("Internal Utility Functions", () => {
 		it("extracts pathname from absolute HTTP URL with subpath", () => {
 			expect(
 				extractPathnameFromResourceUrl(
-					"http://cdn.example.com/subpath/assets/chunk.js",
-					"http://cdn.example.com/subpath/"
+					"http://cdn.example.com/subpath/assets/chunk.js"
 				)
 			).toBe("/subpath/assets/chunk.js");
 		});
@@ -143,26 +141,25 @@ describe("Internal Utility Functions", () => {
 		it("extracts pathname from protocol-relative URL", () => {
 			expect(
 				extractPathnameFromResourceUrl(
-					"//cdn.example.com/assets/main.js",
-					"//cdn.example.com/"
+					"//cdn.example.com/assets/main.js"
 				)
 			).toBe("/assets/main.js");
 		});
 
 		it("handles root-relative URLs", () => {
-			expect(extractPathnameFromResourceUrl("/assets/main.js", "/")).toBe(
+			expect(extractPathnameFromResourceUrl("/assets/main.js")).toBe(
 				"/assets/main.js"
 			);
 		});
 
 		it("handles relative URLs without leading slash", () => {
-			expect(extractPathnameFromResourceUrl("assets/main.js", "/")).toBe(
+			expect(extractPathnameFromResourceUrl("assets/main.js")).toBe(
 				"/assets/main.js"
 			);
 		});
 
 		it("handles relative URLs with ./", () => {
-			expect(extractPathnameFromResourceUrl("./assets/main.js", "/")).toBe(
+			expect(extractPathnameFromResourceUrl("./assets/main.js")).toBe(
 				"/assets/main.js"
 			);
 		});
@@ -170,8 +167,7 @@ describe("Internal Utility Functions", () => {
 		it("handles URL with query string", () => {
 			expect(
 				extractPathnameFromResourceUrl(
-					"https://cdn.example.com/assets/main.js?v=123",
-					"https://cdn.example.com/"
+					"https://cdn.example.com/assets/main.js?v=123"
 				)
 			).toBe("/assets/main.js");
 		});
@@ -179,8 +175,7 @@ describe("Internal Utility Functions", () => {
 		it("handles URL with hash", () => {
 			expect(
 				extractPathnameFromResourceUrl(
-					"https://cdn.example.com/assets/main.js#section",
-					"https://cdn.example.com/"
+					"https://cdn.example.com/assets/main.js#section"
 				)
 			).toBe("/assets/main.js");
 		});
@@ -549,8 +544,7 @@ describe("Internal Utility Functions", () => {
 				"sha256",
 				"anonymous",
 				undefined,
-				preComputedHashes,
-				"https://cdn.example.com/"
+				preComputedHashes
 			);
 
 			expect(getAttrValue(element, "integrity")).toBe("sha256-testHash123");
@@ -571,8 +565,7 @@ describe("Internal Utility Functions", () => {
 				"sha384",
 				"anonymous",
 				undefined,
-				preComputedHashes,
-				"//cdn.example.com/"
+				preComputedHashes
 			);
 
 			expect(getAttrValue(element, "integrity")).toBe("sha384-cssHash");
@@ -597,8 +590,7 @@ describe("Internal Utility Functions", () => {
 				"sha512",
 				undefined,
 				undefined,
-				preComputedHashes,
-				"https://cdn.example.com/app/v2/"
+				preComputedHashes
 			);
 
 			expect(getAttrValue(element, "integrity")).toBe("sha512-bundleHash");

@@ -162,22 +162,20 @@ export function joinBaseHref(base: string, chunkFile: string): string {
  * to have a leading slash.
  *
  * @param resourceUrl - The resource URL from HTML element (src/href attribute)
- * @param _base - The Vite base config value (reserved for future use)
  * @returns The pathname suitable for hash lookup (e.g., "/assets/main.js")
  *
  * @example
- * extractPathnameFromResourceUrl("https://cdn.example.com/assets/main.js", "https://cdn.example.com/")
+ * extractPathnameFromResourceUrl("https://cdn.example.com/assets/main.js")
  * // returns "/assets/main.js"
  *
- * extractPathnameFromResourceUrl("/assets/main.js", "/")
+ * extractPathnameFromResourceUrl("/assets/main.js")
  * // returns "/assets/main.js"
  *
- * extractPathnameFromResourceUrl("assets/main.js", "/")
+ * extractPathnameFromResourceUrl("assets/main.js")
  * // returns "/assets/main.js"
  */
 export function extractPathnameFromResourceUrl(
-	resourceUrl: string,
-	_base: string
+	resourceUrl: string
 ): string {
 	// Handle absolute HTTP/HTTPS and protocol-relative URLs
 	if (isHttpUrl(resourceUrl)) {
@@ -567,7 +565,6 @@ function setAttrValue(element: Element, name: string, value: string): void {
  * @param crossorigin - CORS setting to apply
  * @param resourceOpts - Resource loading configuration
  * @param preComputedHashes - Optional pre-computed integrity hashes by pathname
- * @param base - Vite base config value for resolving absolute CDN URLs
  */
 export async function processElement(
 	element: Element,
@@ -575,8 +572,7 @@ export async function processElement(
 	algorithm: "sha256" | "sha384" | "sha512",
 	crossorigin?: "anonymous" | "use-credentials",
 	resourceOpts?: LoadResourceOptions,
-	preComputedHashes?: Record<string, string>,
-	base: string = "/"
+	preComputedHashes?: Record<string, string>
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
@@ -591,7 +587,7 @@ export async function processElement(
 	let integrity: string | undefined;
 	if (preComputedHashes && resourcePath) {
 		// Extract pathname from resource URL (handles absolute CDN URLs)
-		const pathname = extractPathnameFromResourceUrl(resourcePath, base);
+		const pathname = extractPathnameFromResourceUrl(resourcePath);
 
 		// Try to find a matching pre-computed hash
 		// Check exact pathname first, then try normalized versions
@@ -692,14 +688,12 @@ export async function addSriToHtml(
 		resourceOpts,
 		skipResources = [],
 		preComputedHashes,
-		base = "/",
 	}: {
 		algorithm?: "sha256" | "sha384" | "sha512";
 		crossorigin?: "anonymous" | "use-credentials";
 		resourceOpts?: LoadResourceOptions;
 		skipResources?: string[];
 		preComputedHashes?: Record<string, string>;
-		base?: string;
 	} = {}
 ): Promise<string> {
 	try {
@@ -722,8 +716,7 @@ export async function addSriToHtml(
 					algorithm,
 					crossorigin,
 					resourceOpts,
-					preComputedHashes,
-					base
+					preComputedHashes
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
 					const src =
@@ -1637,7 +1630,6 @@ export class HtmlProcessor {
 			},
 			skipResources: this.config.skipResources,
 			preComputedHashes: sriByPathname,
-			base: this.config.base,
 		});
 	}
 
