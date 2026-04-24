@@ -39,6 +39,7 @@
 - [Skipping Resources](#skipping-resources)
 - [Lazy-loaded Chunks and Dynamic Tags](#lazy-loaded-chunks-and-dynamic-tags)
 - [Runtime Patching](#runtime-patching)
+- [Vite Manifest Integration](#vite-manifest-integration)
 - [Compatibility](#compatibility)
 - [Examples](#examples)
 - [Contributing](#contributing)
@@ -181,6 +182,48 @@ The runtime only processes elements that are eligible for SRI:
 ### Skip patterns
 
 The runtime respects `skipResources` patterns, allowing you to exclude specific resources from automatic SRI injection even when created dynamically.
+
+## Vite Manifest Integration
+
+When Vite emits a build manifest (`build.manifest: true`), this plugin automatically augments it with integrity values. This is useful when your backend owns HTML generation and reads the manifest to know which assets to load — the backend can now attach `integrity` without re-hashing the files.
+
+The feature is automatic and purely additive: if no manifest is emitted, nothing changes. Both the modern `.vite/manifest.json` (Vite ≥ 4.3) and the legacy `manifest.json` locations are recognized. The SSR manifest (`.vite/ssr-manifest.json`) is left alone — it has a different schema.
+
+### Augmented schema
+
+Two fields are added per entry:
+
+- `integrity` — SRI hash for the entry's primary `file`, when the file is a JS or CSS asset the plugin already hashes.
+- `cssIntegrity` — parallel `(string | null)[]` array aligned 1:1 with `css[]`. A `null` at index `i` means `css[i]` has no hash (non-JS/CSS file, or excluded via `skipResources`).
+
+Example manifest after augmentation:
+
+```json
+{
+  "src/main.tsx": {
+    "file": "assets/main-XYZ.js",
+    "integrity": "sha384-...",
+    "src": "src/main.tsx",
+    "isEntry": true,
+    "css": ["assets/main-ABC.css"],
+    "cssIntegrity": ["sha384-..."],
+    "imports": ["_shared-GHI.js"]
+  },
+  "_shared-GHI.js": {
+    "file": "_shared-GHI.js",
+    "integrity": "sha384-..."
+  }
+}
+```
+
+Consumers resolve `imports` / `dynamicImports` by key lookup into the manifest, so no special handling of those arrays is needed.
+
+### Notes
+
+- Existing `integrity` or `cssIntegrity` values on an entry are preserved and never overwritten.
+- `skipResources` patterns are honored: matching files get no integrity in the manifest, keeping behavior consistent with HTML injection and runtime patching.
+- Only JS and CSS files are hashed (matching the rest of the plugin). Entries in `assets` (images, fonts, etc.) are untouched.
+- If the manifest fails to parse, a warning is logged and the asset is left unchanged; the rest of the build continues.
 
 ## Compatibility
 

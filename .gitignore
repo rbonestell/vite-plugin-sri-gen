@@ -4,6 +4,10 @@
 .serena/*
 .kilocode/*
 
+### Misc ###
+docs/
+temp/
+
 ### Node ###
 # Logs
 logs

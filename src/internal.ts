@@ -1806,6 +1806,225 @@ export class HtmlProcessor {
 // #endregion
 
 // =======================================================
+// #region MANIFEST PROCESSING
+// =======================================================
+
+/**
+ * Minimal recognized shape of a Vite manifest entry. Any unrecognized fields
+ * are preserved untouched during augmentation.
+ */
+type ViteManifestEntry = {
+	file: string;
+	css?: string[];
+	integrity?: string;
+	cssIntegrity?: Array<string | null>;
+	[key: string]: unknown;
+};
+
+type ViteManifest = Record<string, ViteManifestEntry>;
+
+/**
+ * Injects SRI integrity values into Vite-emitted manifest.json files.
+ *
+ * Behavior:
+ * - Purely additive: augments entries with `integrity` (for `file`) and
+ *   `cssIntegrity` (parallel array for `css`). Non-matching entries remain
+ *   unchanged.
+ * - Skips `.vite/ssr-manifest.json` (different schema).
+ * - Honors skipResources patterns — files matching a pattern get no integrity.
+ * - Never overwrites an existing `integrity`/`cssIntegrity` value.
+ * - On JSON parse failure or unexpected shape, warns and leaves the asset alone.
+ */
+export class ManifestProcessor {
+	private static readonly KNOWN_MANIFEST_NAMES: ReadonlySet<string> = new Set([
+		".vite/manifest.json",
+		"manifest.json",
+	]);
+	private static readonly SSR_MANIFEST_NAME = ".vite/ssr-manifest.json";
+
+	constructor(private readonly logger: BundleLogger) {}
+
+	/**
+	 * Finds every Vite-style manifest asset in the bundle and augments each
+	 * entry with an integrity value (for the primary `file`) and a parallel
+	 * `cssIntegrity` array (for the `css` array, when present).
+	 *
+	 * @param bundle Rollup OutputBundle
+	 * @param sriByPathname Map of pathnames (with leading `/`) to SRI hashes
+	 * @param skipResources skipResources patterns — matching files get no integrity
+	 * @returns counts of manifest files processed and entries augmented
+	 */
+	injectIntegrity(
+		bundle: OutputBundle,
+		sriByPathname: Record<string, string>,
+		skipResources: string[]
+	): { processedFiles: number; augmentedEntries: number } {
+		let processedFiles = 0;
+		let augmentedEntries = 0;
+
+		for (const [fileName, bundleItem] of Object.entries(bundle)) {
+			if (bundleItem.type !== "asset") continue;
+			if (!this.isManifestCandidate(fileName)) continue;
+
+			const asset = bundleItem as OutputAsset;
+			const raw = this.assetSourceToString(asset.source);
+			if (raw === null) continue;
+
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch (err) {
+				this.logger.warn(
+					`Failed to parse Vite manifest at ${fileName}; leaving untouched. ${
+						err instanceof Error ? err.message : String(err)
+					}`
+				);
+				continue;
+			}
+
+			if (!this.isManifestShape(parsed, fileName)) continue;
+
+			const count = this.augmentManifest(
+				parsed,
+				sriByPathname,
+				skipResources,
+				fileName
+			);
+
+			if (count > 0) {
+				asset.source = JSON.stringify(parsed, null, 2);
+				augmentedEntries += count;
+			}
+			processedFiles++;
+		}
+
+		return { processedFiles, augmentedEntries };
+	}
+
+	private isManifestCandidate(fileName: string): boolean {
+		if (fileName === ManifestProcessor.SSR_MANIFEST_NAME) return false;
+		if (ManifestProcessor.KNOWN_MANIFEST_NAMES.has(fileName)) return true;
+		// Accept custom names ending in manifest.json (user-configured build.manifest string)
+		return fileName.endsWith("manifest.json");
+	}
+
+	private assetSourceToString(source: unknown): string | null {
+		if (typeof source === "string") return source;
+		if (source instanceof Uint8Array) {
+			try {
+				return new TextDecoder().decode(source);
+			} catch {
+				return null;
+			}
+		}
+		return null;
+	}
+
+	private isManifestShape(
+		manifest: unknown,
+		fileName: string
+	): manifest is ViteManifest {
+		if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+			this.logger.warn(
+				`Vite manifest at ${fileName} is not a plain object; skipping integrity injection.`
+			);
+			return false;
+		}
+		return true;
+	}
+
+	private augmentManifest(
+		manifest: ViteManifest,
+		sriByPathname: Record<string, string>,
+		skipResources: string[],
+		fileName: string
+	): number {
+		let augmented = 0;
+		for (const [key, entry] of Object.entries(manifest)) {
+			if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+				this.logger.warn(
+					`Skipping manifest entry "${key}" in ${fileName}: not an object.`
+				);
+				continue;
+			}
+			if (typeof (entry as ViteManifestEntry).file !== "string") {
+				this.logger.warn(
+					`Skipping manifest entry "${key}" in ${fileName}: missing string "file".`
+				);
+				continue;
+			}
+
+			let touched = false;
+
+			// Primary file integrity (never overwrite existing)
+			if (typeof entry.integrity !== "string") {
+				const hash = this.lookupHash(
+					entry.file,
+					sriByPathname,
+					skipResources
+				);
+				if (hash) {
+					entry.integrity = hash;
+					touched = true;
+				}
+			}
+
+			// Parallel cssIntegrity array (never overwrite existing)
+			if (
+				Array.isArray(entry.css) &&
+				entry.css.length > 0 &&
+				!Array.isArray(entry.cssIntegrity)
+			) {
+				const cssIntegrity: Array<string | null> = [];
+				let haveAny = false;
+				for (const cssFile of entry.css) {
+					if (typeof cssFile !== "string") {
+						cssIntegrity.push(null);
+						continue;
+					}
+					const hash = this.lookupHash(
+						cssFile,
+						sriByPathname,
+						skipResources
+					);
+					cssIntegrity.push(hash ?? null);
+					if (hash) haveAny = true;
+				}
+				if (haveAny) {
+					entry.cssIntegrity = cssIntegrity;
+					touched = true;
+				}
+			}
+
+			if (touched) augmented++;
+		}
+		return augmented;
+	}
+
+	private lookupHash(
+		file: string,
+		sriByPathname: Record<string, string>,
+		skipResources: string[]
+	): string | undefined {
+		if (this.isSkipped(file, skipResources)) return undefined;
+		const key = file.startsWith("/") ? file : `/${file}`;
+		return sriByPathname[key];
+	}
+
+	private isSkipped(file: string, skipResources: string[]): boolean {
+		if (!skipResources || skipResources.length === 0) return false;
+		for (const pattern of skipResources) {
+			if (matchesPattern(pattern, file)) return true;
+			// Also allow patterns written with a leading slash to match
+			if (matchesPattern(pattern, `/${file}`)) return true;
+		}
+		return false;
+	}
+}
+
+// #endregion
+
+// =======================================================
 // #region RUNTIME SRI INJECTION
 // =======================================================
 

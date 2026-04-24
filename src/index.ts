@@ -8,6 +8,7 @@ import {
 	HtmlProcessor,
 	installSriRuntime,
 	IntegrityProcessor,
+	ManifestProcessor,
 	validateGenerateBundleInputs,
 } from "./internal";
 
@@ -211,6 +212,21 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						dynamicChunkFiles
 					);
 
+					// Step 5: Inject SRI integrity into Vite manifest(s), if emitted.
+					// Purely additive — no-op when build.manifest is disabled.
+					logger.info("Injecting SRI integrity into Vite manifest (if present)");
+					const manifestProcessor = new ManifestProcessor(logger);
+					const manifestResult = manifestProcessor.injectIntegrity(
+						bundle,
+						sriByPathname,
+						skipResources
+					);
+					if (manifestResult.processedFiles > 0) {
+						logger.info(
+							`Manifest integrity: ${manifestResult.augmentedEntries} entr(ies) updated across ${manifestResult.processedFiles} manifest file(s)`
+						);
+					}
+
 					const assetCount = Object.keys(sriByPathname).length;
 					const htmlCount = Object.values(bundle).filter(
 						(item) =>
@@ -218,8 +234,12 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						typeof item.fileName === "string" &&
 						item.fileName.endsWith(".html")
 					).length;
+					const manifestSummary =
+						manifestResult.processedFiles > 0
+							? `, ${manifestResult.processedFiles} manifest file(s) updated`
+							: "";
 					logger.summary(
-						`SRI generation completed: ${assetCount} asset(s) processed, ${htmlCount} HTML file(s) updated`
+						`SRI generation completed: ${assetCount} asset(s) processed, ${htmlCount} HTML file(s) updated${manifestSummary}`
 					);
 				} catch (error) {
 					handleGenerateBundleError(error, logger);

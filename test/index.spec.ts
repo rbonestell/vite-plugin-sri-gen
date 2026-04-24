@@ -1923,4 +1923,135 @@ describe("vite-plugin-sri-gen", () => {
 			);
 		});
 	});
+
+	describe("Vite Manifest Integration", () => {
+		it("injects integrity into an emitted .vite/manifest.json", async () => {
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main.js",
+					src: "src/main.tsx",
+					isEntry: true,
+					css: ["assets/main.css"],
+				},
+			};
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/main.js": {
+					type: "chunk",
+					fileName: "assets/main.js",
+					code: "console.log('main')",
+				},
+				"assets/main.css": {
+					type: "asset",
+					fileName: "assets/main.css",
+					source: "body{color:red}",
+				},
+				".vite/manifest.json": {
+					type: "asset",
+					fileName: ".vite/manifest.json",
+					source: JSON.stringify(manifest),
+				},
+			};
+
+			await plugin.generateBundle.handler({}, bundle);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toMatch(/^sha256-/);
+			expect(Array.isArray(updated["src/main.tsx"].cssIntegrity)).toBe(true);
+			expect(updated["src/main.tsx"].cssIntegrity[0]).toMatch(/^sha256-/);
+			// Preserves unrelated fields
+			expect(updated["src/main.tsx"].isEntry).toBe(true);
+		});
+
+		it("mentions manifest count in the completion summary", async () => {
+			const mockContext = createMockPluginContext();
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			const manifest = {
+				"src/main.tsx": { file: "assets/main.js" },
+			};
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/main.js": {
+					type: "chunk",
+					fileName: "assets/main.js",
+					code: "console.log('main')",
+				},
+				".vite/manifest.json": {
+					type: "asset",
+					fileName: ".vite/manifest.json",
+					source: JSON.stringify(manifest),
+				},
+			};
+
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+			expect(mockContext.info).toHaveBeenCalledWith(
+				expect.stringContaining("manifest file(s) updated")
+			);
+		});
+
+		it("is a no-op when build.manifest is off (no manifest asset present)", async () => {
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/main.js": {
+					type: "chunk",
+					fileName: "assets/main.js",
+					code: "console.log('main')",
+				},
+			};
+
+			// Should not throw and should leave bundle keys unchanged
+			await plugin.generateBundle.handler({}, bundle);
+			expect(Object.keys(bundle)).toEqual(["index.html", "assets/main.js"]);
+		});
+
+		it("honors skipResources when injecting manifest integrity", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				skipResources: ["assets/main.js"],
+			}) as any;
+			const manifest = {
+				"src/main.tsx": { file: "assets/main.js" },
+				"_shared.js": { file: "_shared.js" },
+			};
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!doctype html><html><head></head><body></body></html>",
+				},
+				"assets/main.js": {
+					type: "chunk",
+					fileName: "assets/main.js",
+					code: "console.log('main')",
+				},
+				"_shared.js": {
+					type: "chunk",
+					fileName: "_shared.js",
+					code: "export {}",
+				},
+				".vite/manifest.json": {
+					type: "asset",
+					fileName: ".vite/manifest.json",
+					source: JSON.stringify(manifest),
+				},
+			};
+
+			await plugin.generateBundle.handler({}, bundle);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBeUndefined();
+			expect(updated["_shared.js"].integrity).toMatch(/^sha256-/);
+		});
+	});
 });
