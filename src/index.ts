@@ -8,6 +8,7 @@ import {
 	HtmlProcessor,
 	installSriRuntime,
 	IntegrityProcessor,
+	ManifestProcessor,
 	validateGenerateBundleInputs,
 } from "./internal";
 
@@ -114,18 +115,44 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 				logger = createLogger(this, verboseLogging);
 
 				try {
-					// Step 1: Validate inputs and early return conditions
+					// Step 1: Validate inputs. Emit any validation warning (e.g. the
+					// SSR-no-HTML diagnostic) but only short-circuit the entire handler
+					// when there is genuinely nothing to do — neither HTML nor a Vite
+					// manifest to augment. Processing a manifest with no HTML is the
+					// primary target of issue #23 (backend-owned HTML generation).
 					const validationResult = validateGenerateBundleInputs(
 						bundle,
 						isSSR
 					);
-					if (!validationResult.isValid) {
-						if (
-							validationResult.shouldWarn &&
-							validationResult.message
-						) {
-							logger.warn(validationResult.message);
-						}
+					if (
+						validationResult.shouldWarn &&
+						validationResult.message
+					) {
+						logger.warn(validationResult.message);
+					}
+					if (
+						!bundle ||
+						typeof bundle !== "object" ||
+						Object.keys(bundle).length === 0
+					) {
+						return;
+					}
+					const hasHtmlFiles = Object.entries(bundle).some(
+						([fn, item]) =>
+							fn.toLowerCase().endsWith(".html") &&
+							item &&
+							(item as any).type === "asset"
+					);
+					const hasManifestFiles = Object.entries(bundle).some(
+						([fn, item]) =>
+							item &&
+							(item as any).type === "asset" &&
+							fn !== ".vite/ssr-manifest.json" &&
+							fn.endsWith("manifest.json")
+					);
+					// Preserve existing no-op behavior when the bundle produces neither
+					// HTML nor a manifest — nothing for this plugin to do.
+					if (!hasHtmlFiles && !hasManifestFiles) {
 						return;
 					}
 
@@ -190,26 +217,44 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					dynamicChunkFiles =
 						dynamicImportAnalyzer.analyzeDynamicImports(bundle);
 
-					// Step 4: Process HTML files with comprehensive error handling
-					logger.info("Processing HTML files for SRI injection");
-					const htmlProcessor = new HtmlProcessor({
-						algorithm,
-						crossorigin,
-						base,
-						preloadDynamicChunks,
-						enableCache,
-						remoteCache,
-						pending,
-						fetchTimeoutMs,
-						logger,
-						skipResources,
-					});
+					// Step 4: Process HTML files with comprehensive error handling.
+					// Skipped when the bundle emits no HTML (e.g. backend-owned HTML generation).
+					if (hasHtmlFiles) {
+						logger.info("Processing HTML files for SRI injection");
+						const htmlProcessor = new HtmlProcessor({
+							algorithm,
+							crossorigin,
+							base,
+							preloadDynamicChunks,
+							enableCache,
+							remoteCache,
+							pending,
+							fetchTimeoutMs,
+							logger,
+							skipResources,
+						});
 
-					await htmlProcessor.processHtmlFiles(
+						await htmlProcessor.processHtmlFiles(
+							bundle,
+							sriByPathname,
+							dynamicChunkFiles
+						);
+					}
+
+					// Step 5: Inject SRI integrity into Vite manifest(s), if emitted.
+					// Purely additive — no-op when build.manifest is disabled.
+					logger.info("Injecting SRI integrity into Vite manifest (if present)");
+					const manifestProcessor = new ManifestProcessor(logger);
+					const manifestResult = manifestProcessor.injectIntegrity(
 						bundle,
 						sriByPathname,
-						dynamicChunkFiles
+						skipResources
 					);
+					if (manifestResult.processedFiles > 0) {
+						logger.info(
+							`Manifest integrity: ${manifestResult.augmentedEntries} entr(ies) updated across ${manifestResult.processedFiles} manifest file(s)`
+						);
+					}
 
 					const assetCount = Object.keys(sriByPathname).length;
 					const htmlCount = Object.values(bundle).filter(
@@ -218,8 +263,12 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						typeof item.fileName === "string" &&
 						item.fileName.endsWith(".html")
 					).length;
+					const manifestSummary =
+						manifestResult.processedFiles > 0
+							? `, ${manifestResult.processedFiles} manifest file(s) updated`
+							: "";
 					logger.summary(
-						`SRI generation completed: ${assetCount} asset(s) processed, ${htmlCount} HTML file(s) updated`
+						`SRI generation completed: ${assetCount} asset(s) processed, ${htmlCount} HTML file(s) updated${manifestSummary}`
 					);
 				} catch (error) {
 					handleGenerateBundleError(error, logger);
