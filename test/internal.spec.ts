@@ -17,6 +17,7 @@ import {
 	isHttpUrl,
 	joinBaseHref,
 	loadResource,
+	ManifestProcessor,
 	matchesPattern,
 	normalizeBundlePath,
 	processElement,
@@ -1567,6 +1568,553 @@ describe("Processing Classes", () => {
 			expect(mockLogger.warn).toHaveBeenCalledWith(
 				expect.stringContaining("No HTML files found in bundle")
 			);
+		});
+	});
+
+	describe("ManifestProcessor", () => {
+		const SRI_JS_MAIN = "sha384-MAINJS";
+		const SRI_CSS = "sha384-MAINCSS";
+		const SRI_SHARED = "sha384-SHARED";
+
+		const makeManifestAsset = (fileName: string, manifest: unknown) => ({
+			type: "asset" as const,
+			fileName,
+			source: JSON.stringify(manifest),
+		});
+
+		const defaultSriMap = (): Record<string, string> => ({
+			"/assets/main-XYZ.js": SRI_JS_MAIN,
+			"/assets/main-ABC.css": SRI_CSS,
+			"/_shared-GHI.js": SRI_SHARED,
+		});
+
+		const defaultManifest = () => ({
+			"src/main.tsx": {
+				file: "assets/main-XYZ.js",
+				src: "src/main.tsx",
+				isEntry: true,
+				css: ["assets/main-ABC.css"],
+				imports: ["_shared-GHI.js"],
+			},
+			"_shared-GHI.js": {
+				file: "_shared-GHI.js",
+			},
+		});
+
+		it("is a no-op when the bundle contains no manifest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"index.html": { type: "asset", fileName: "index.html", source: "<html/>" },
+				"assets/main-XYZ.js": { type: "chunk", fileName: "assets/main-XYZ.js", code: "x" },
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result).toEqual({ processedFiles: 0, augmentedEntries: 0 });
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("augments .vite/manifest.json with integrity and cssIntegrity", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", defaultManifest()),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(1);
+			expect(result.augmentedEntries).toBe(2);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+			expect(updated["src/main.tsx"].cssIntegrity).toEqual([SRI_CSS]);
+			expect(updated["_shared-GHI.js"].integrity).toBe(SRI_SHARED);
+
+			// Preserves unrelated fields
+			expect(updated["src/main.tsx"].isEntry).toBe(true);
+			expect(updated["src/main.tsx"].imports).toEqual(["_shared-GHI.js"]);
+		});
+
+		it("augments legacy manifest.json filename", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"manifest.json": makeManifestAsset("manifest.json", defaultManifest()),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(1);
+			const updated = JSON.parse(String(bundle["manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("honors skipResources for primary file", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(
+					".vite/manifest.json",
+					defaultManifest()
+				),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), [
+				"assets/main-*.js",
+			]);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBeUndefined();
+			// Shared chunk unaffected
+			expect(updated["_shared-GHI.js"].integrity).toBe(SRI_SHARED);
+		});
+
+		it("honors skipResources for individual css entries and emits nulls", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main-XYZ.js",
+					css: ["assets/main-ABC.css", "assets/extra-DEF.css"],
+				},
+			};
+			const sriMap = {
+				"/assets/main-XYZ.js": SRI_JS_MAIN,
+				"/assets/main-ABC.css": SRI_CSS,
+				"/assets/extra-DEF.css": "sha384-EXTRA",
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, sriMap, ["assets/extra-*"]);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toEqual([SRI_CSS, null]);
+		});
+
+		it("omits cssIntegrity when no css entry has a hash", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main-XYZ.js",
+					css: ["assets/unknown.css"],
+				},
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(
+				bundle,
+				{ "/assets/main-XYZ.js": SRI_JS_MAIN },
+				[]
+			);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toBeUndefined();
+		});
+
+		it("omits integrity when the file is not present in sriByPathname", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"image.png": { file: "assets/image.png" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["image.png"].integrity).toBeUndefined();
+		});
+
+		it("warns and leaves asset untouched when JSON is invalid", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: "{ not valid json",
+				},
+			};
+			const original = bundle[".vite/manifest.json"].source;
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(bundle[".vite/manifest.json"].source).toBe(original);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to parse Vite manifest")
+			);
+		});
+
+		it("warns when manifest root is not a plain object", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", [1, 2, 3]),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining("not a plain object")
+			);
+		});
+
+		it("warns per offending entry but keeps processing the rest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"bad-non-object": "oops",
+				"bad-missing-file": { src: "x" },
+				"ok": { file: "assets/main-XYZ.js" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const warnMessages = logger.warn.mock.calls.map((c) => c[0]);
+			expect(warnMessages.some((m) => m.includes("bad-non-object"))).toBe(true);
+			expect(warnMessages.some((m) => m.includes("bad-missing-file"))).toBe(true);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["ok"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("ignores .vite/ssr-manifest.json", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const ssrManifest = {
+				"src/main.tsx": ["assets/main-XYZ.js"],
+			};
+			const bundle: any = {
+				".vite/ssr-manifest.json": makeManifestAsset(
+					".vite/ssr-manifest.json",
+					ssrManifest
+				),
+			};
+			const original = bundle[".vite/ssr-manifest.json"].source;
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(bundle[".vite/ssr-manifest.json"].source).toBe(original);
+		});
+
+		it("preserves an existing integrity value and does not overwrite", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main-XYZ.js",
+					integrity: "sha384-PREEXISTING",
+					css: ["assets/main-ABC.css"],
+					cssIntegrity: ["sha384-PREEXISTING-CSS"],
+				},
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe("sha384-PREEXISTING");
+			expect(updated["src/main.tsx"].cssIntegrity).toEqual(["sha384-PREEXISTING-CSS"]);
+		});
+
+		it("handles manifest source as Uint8Array", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bytes = new TextEncoder().encode(JSON.stringify(defaultManifest()));
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: bytes,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(1);
+			// Output is re-serialized as a JSON string
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("does not rewrite source or count the file when no entries augment", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"image.png": { file: "assets/image.png" },
+			};
+			const originalSource = JSON.stringify(manifest);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: originalSource,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(bundle[".vite/manifest.json"].source).toBe(originalSource);
+		});
+
+		it("silently ignores a custom *manifest.json that does not look like a Vite manifest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			// PWA-like web-app manifest also named "...manifest.json" — no `file` fields.
+			const pwaManifest = {
+				name: "My App",
+				short_name: "App",
+				icons: [{ src: "/icon.png", sizes: "192x192" }],
+			};
+			const originalSource = JSON.stringify(pwaManifest);
+			const bundle: any = {
+				"public/app-manifest.json": {
+					type: "asset" as const,
+					fileName: "public/app-manifest.json",
+					source: originalSource,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(bundle["public/app-manifest.json"].source).toBe(originalSource);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("augments a custom-named manifest.json that has Vite manifest shape", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"custom-manifest.json": makeManifestAsset(
+					"custom-manifest.json",
+					defaultManifest()
+				),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(1);
+			const updated = JSON.parse(String(bundle["custom-manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("emits null placeholders for non-string entries inside css[]", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main-XYZ.js",
+					// Simulate a corrupt or unexpected manifest: css contains a non-string.
+					css: ["assets/main-ABC.css", 42, null],
+				},
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toEqual([SRI_CSS, null, null]);
+		});
+
+		it("silently skips assets whose source is neither string nor Uint8Array", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					// Exotic source type unlikely in practice; asserts defensive path.
+					source: 42 as any,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("silently recovers when TextDecoder fails to decode a Uint8Array-like source", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			// Object whose prototype chain includes Uint8Array.prototype (so
+			// `instanceof Uint8Array` is true) but which lacks the internal
+			// [[TypedArrayName]] slot, causing TextDecoder.decode to throw.
+			const fakeBuffer = Object.create(Uint8Array.prototype);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: fakeBuffer,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("stringifies non-Error throws from JSON.parse in the warn message", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: "{}",
+				},
+			};
+
+			const originalParse = JSON.parse;
+			JSON.parse = (() => {
+				throw "weird-string-error";
+			}) as any;
+			try {
+				processor.injectIntegrity(bundle, defaultSriMap(), []);
+			} finally {
+				JSON.parse = originalParse;
+			}
+
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining("weird-string-error")
+			);
+		});
+
+		it("silently ignores a custom *manifest.json whose contents fail to parse", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"public/app-manifest.json": {
+					type: "asset" as const,
+					fileName: "public/app-manifest.json",
+					source: "{ not valid json",
+				},
+			};
+			const originalSource = bundle["public/app-manifest.json"].source;
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(bundle["public/app-manifest.json"].source).toBe(originalSource);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("silently ignores a custom *manifest.json whose root is not an object", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"public/app-manifest.json": makeManifestAsset(
+					"public/app-manifest.json",
+					[1, 2, 3]
+				),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("skips null and array entries with a warning, processing the rest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest: any = {
+				"null-entry": null,
+				"array-entry": [1, 2, 3],
+				"ok": { file: "assets/main-XYZ.js" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const warnMsgs = logger.warn.mock.calls.map((c) => c[0]);
+			expect(warnMsgs.some((m) => m.includes("null-entry"))).toBe(true);
+			expect(warnMsgs.some((m) => m.includes("array-entry"))).toBe(true);
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["ok"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("does not emit cssIntegrity when css is an empty array", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": { file: "assets/main-XYZ.js", css: [] as string[] },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toBeUndefined();
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("handles manifest entries whose file already starts with a leading slash", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": { file: "/assets/main-XYZ.js" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("matches skipResources patterns written with a leading slash", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(
+					".vite/manifest.json",
+					defaultManifest()
+				),
+			};
+
+			// Pattern intentionally starts with "/" — exercises the fallback
+			// match against "/" + file inside ManifestProcessor.isSkipped.
+			processor.injectIntegrity(bundle, defaultSriMap(), [
+				"/assets/main-*.js",
+			]);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBeUndefined();
+			// Unrelated entries still receive integrity.
+			expect(updated["_shared-GHI.js"].integrity).toBe(SRI_SHARED);
 		});
 	});
 
