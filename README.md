@@ -19,16 +19,20 @@
 - Works out of the box in production builds
 - Optionally injects rel="modulepreload" with integrity for lazy-loaded chunks
 - Optionally injects a tiny CSP-safe runtime that adds integrity/crossorigin to dynamically inserted \<script\>/\<link\>
+- Augments Vite's build manifest with SRI hashes so backends that own HTML generation can attach `integrity` without re-hashing
 - Build-only by design (no dev server SRI)
 - Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
 - Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
 - ESM-only, Node 18+ (uses global fetch)
 
 > [!IMPORTANT]  
-> Unfortunately, this plugin is not compatible with most [SSR (server-side rendering)](https://vuejs.org/guide/scaling-up/ssr.html) projects, including but not limited to those using Svelte.
-> This plugin works by hooking into the Vite and Rollup events at build time to calculate integrity hashes and apply them to the HTML elements. Because SSR projects typically do not generate markup at build time, this plugin is effectively a no-op when implemented in most SSR projects.
+> Unfortunately, this plugin cannot directly modify HTML for most [SSR (server-side rendering)](https://vuejs.org/guide/scaling-up/ssr.html) projects, including but not limited to those using Svelte.
+> This plugin works by hooking into the Vite and Rollup events at build time to calculate integrity hashes and apply them to the HTML elements. Because SSR projects typically do not generate markup at build time, the HTML-injection step is effectively a no-op when implemented in most SSR projects.
 >
-> The exception to this is when an SSR project utilizes pre-rendering; explicitly building, bundling, and outputting prerendered HTML during the build. Vite plugins such as [vite-plugin-ssr](https://vite-plugin-ssr.com/pre-rendering) support this, but this is typically not the case for most SSR projects.
+> Two scenarios still benefit:
+>
+> - **Pre-rendering** — SSR projects that explicitly build, bundle, and output prerendered HTML during the build (for example via [vite-plugin-ssr](https://vite-plugin-ssr.com/pre-rendering)) have their HTML augmented normally.
+> - **Backend-owned HTML** — if your SSR runtime (or any backend) reads the Vite manifest to decide which assets to load, enable `build.manifest: true` and see [Vite Manifest Integration](#vite-manifest-integration). The plugin will emit `integrity` values in the manifest so your server can attach them to the tags it renders.
 
 ## Table of Contents
 
