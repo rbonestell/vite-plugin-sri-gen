@@ -1957,6 +1957,165 @@ describe("Processing Classes", () => {
 			expect(result.augmentedEntries).toBe(0);
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
+
+		it("silently recovers when TextDecoder fails to decode a Uint8Array-like source", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			// Object whose prototype chain includes Uint8Array.prototype (so
+			// `instanceof Uint8Array` is true) but which lacks the internal
+			// [[TypedArrayName]] slot, causing TextDecoder.decode to throw.
+			const fakeBuffer = Object.create(Uint8Array.prototype);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: fakeBuffer,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("stringifies non-Error throws from JSON.parse in the warn message", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					source: "{}",
+				},
+			};
+
+			const originalParse = JSON.parse;
+			JSON.parse = (() => {
+				throw "weird-string-error";
+			}) as any;
+			try {
+				processor.injectIntegrity(bundle, defaultSriMap(), []);
+			} finally {
+				JSON.parse = originalParse;
+			}
+
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining("weird-string-error")
+			);
+		});
+
+		it("silently ignores a custom *manifest.json whose contents fail to parse", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"public/app-manifest.json": {
+					type: "asset" as const,
+					fileName: "public/app-manifest.json",
+					source: "{ not valid json",
+				},
+			};
+			const originalSource = bundle["public/app-manifest.json"].source;
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(bundle["public/app-manifest.json"].source).toBe(originalSource);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("silently ignores a custom *manifest.json whose root is not an object", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"public/app-manifest.json": makeManifestAsset(
+					"public/app-manifest.json",
+					[1, 2, 3]
+				),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("skips null and array entries with a warning, processing the rest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest: any = {
+				"null-entry": null,
+				"array-entry": [1, 2, 3],
+				"ok": { file: "assets/main-XYZ.js" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const warnMsgs = logger.warn.mock.calls.map((c) => c[0]);
+			expect(warnMsgs.some((m) => m.includes("null-entry"))).toBe(true);
+			expect(warnMsgs.some((m) => m.includes("array-entry"))).toBe(true);
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["ok"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("does not emit cssIntegrity when css is an empty array", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": { file: "assets/main-XYZ.js", css: [] as string[] },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toBeUndefined();
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("handles manifest entries whose file already starts with a leading slash", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": { file: "/assets/main-XYZ.js" },
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("matches skipResources patterns written with a leading slash", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(
+					".vite/manifest.json",
+					defaultManifest()
+				),
+			};
+
+			// Pattern intentionally starts with "/" — exercises the fallback
+			// match against "/" + file inside ManifestProcessor.isSkipped.
+			processor.injectIntegrity(bundle, defaultSriMap(), [
+				"/assets/main-*.js",
+			]);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBeUndefined();
+			// Unrelated entries still receive integrity.
+			expect(updated["_shared-GHI.js"].integrity).toBe(SRI_SHARED);
+		});
 	});
 
 	describe("Legacy Coverage Tests (Global Overrides - Consider New Architecture)", () => {
