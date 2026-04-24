@@ -1,5 +1,5 @@
 <p align="center">
- 	<img src="https://repository-images.githubusercontent.com/1034544632/2a282a35-ba36-49c1-ae44-407569c62a4b" width=50% height=50% alt="vite-plugin-sri-gen" />
+ 	<img src="https://repository-images.githubusercontent.com/1034544632/2b674281-ff9c-4510-a0ef-91c33e395f0b" width=60% height=60% alt="vite-plugin-sri-gen" />
 </p>
 <p align="center">
 	Add <a href="https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity">Subresource Integrity (SRI)</a> hashes to your Vite build HTML output automatically.
