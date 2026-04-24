@@ -1870,19 +1870,31 @@ export class ManifestProcessor {
 			const raw = this.assetSourceToString(asset.source);
 			if (raw === null) continue;
 
+			const isKnown = this.isKnownManifestName(fileName);
+
 			let parsed: unknown;
 			try {
 				parsed = JSON.parse(raw);
 			} catch (err) {
-				this.logger.warn(
-					`Failed to parse Vite manifest at ${fileName}; leaving untouched. ${
-						err instanceof Error ? err.message : String(err)
-					}`
-				);
+				// For known Vite manifest paths, a parse failure is worth warning about.
+				// For custom *manifest.json assets, stay silent — they may be unrelated
+				// (PWA manifests, plugin-emitted metadata, etc.).
+				if (isKnown) {
+					this.logger.warn(
+						`Failed to parse Vite manifest at ${fileName}; leaving untouched. ${
+							err instanceof Error ? err.message : String(err)
+						}`
+					);
+				}
 				continue;
 			}
 
-			if (!this.isManifestShape(parsed, fileName)) continue;
+			if (!this.isManifestShape(parsed, fileName, isKnown)) continue;
+
+			// For non-known names, require a shape that actually looks like a Vite
+			// build manifest (at least one entry with a string `file`) before we
+			// risk mutating or noisily warning on its contents.
+			if (!isKnown && !this.looksLikeViteManifest(parsed)) continue;
 
 			const count = this.augmentManifest(
 				parsed,
@@ -1894,8 +1906,8 @@ export class ManifestProcessor {
 			if (count > 0) {
 				asset.source = JSON.stringify(parsed, null, 2);
 				augmentedEntries += count;
+				processedFiles++;
 			}
-			processedFiles++;
 		}
 
 		return { processedFiles, augmentedEntries };
@@ -1904,8 +1916,14 @@ export class ManifestProcessor {
 	private isManifestCandidate(fileName: string): boolean {
 		if (fileName === ManifestProcessor.SSR_MANIFEST_NAME) return false;
 		if (ManifestProcessor.KNOWN_MANIFEST_NAMES.has(fileName)) return true;
-		// Accept custom names ending in manifest.json (user-configured build.manifest string)
+		// Accept custom names ending in manifest.json (user-configured build.manifest string).
+		// Strict shape validation in looksLikeViteManifest ensures non-Vite manifests
+		// (PWA, Webpack, arbitrary plugin output) are silently ignored.
 		return fileName.endsWith("manifest.json");
+	}
+
+	private isKnownManifestName(fileName: string): boolean {
+		return ManifestProcessor.KNOWN_MANIFEST_NAMES.has(fileName);
 	}
 
 	private assetSourceToString(source: unknown): string | null {
@@ -1922,15 +1940,37 @@ export class ManifestProcessor {
 
 	private isManifestShape(
 		manifest: unknown,
-		fileName: string
+		fileName: string,
+		isKnown: boolean
 	): manifest is ViteManifest {
 		if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-			this.logger.warn(
-				`Vite manifest at ${fileName} is not a plain object; skipping integrity injection.`
-			);
+			if (isKnown) {
+				this.logger.warn(
+					`Vite manifest at ${fileName} is not a plain object; skipping integrity injection.`
+				);
+			}
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Duck-type check: true if the object looks like a Vite build manifest
+	 * (at least one own-property value is an object with a string `file`).
+	 * Used to filter out unrelated *manifest.json assets emitted by other plugins.
+	 */
+	private looksLikeViteManifest(manifest: ViteManifest): boolean {
+		for (const value of Object.values(manifest)) {
+			if (
+				value &&
+				typeof value === "object" &&
+				!Array.isArray(value) &&
+				typeof (value as ViteManifestEntry).file === "string"
+			) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private augmentManifest(

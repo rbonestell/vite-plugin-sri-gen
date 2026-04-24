@@ -187,7 +187,7 @@ The runtime respects `skipResources` patterns, allowing you to exclude specific 
 
 When Vite emits a build manifest (`build.manifest: true`), this plugin automatically augments it with integrity values. This is useful when your backend owns HTML generation and reads the manifest to know which assets to load — the backend can now attach `integrity` without re-hashing the files.
 
-The feature is automatic and purely additive: if no manifest is emitted, nothing changes. Both the modern `.vite/manifest.json` (Vite ≥ 4.3) and the legacy `manifest.json` locations are recognized. The SSR manifest (`.vite/ssr-manifest.json`) is left alone — it has a different schema.
+The feature is automatic and purely additive: if no manifest is emitted, nothing changes. It runs even when the bundle emits no HTML files, which is the common case for backend-owned HTML generation. Both the modern `.vite/manifest.json` (Vite ≥ 4.3) and the legacy `manifest.json` locations are recognized. Custom manifest filenames (when `build.manifest` is set to a string ending in `manifest.json`) are also detected, but only augmented if their contents match the Vite manifest shape — so unrelated JSON assets that happen to share the suffix (e.g. PWA Web App manifests) are left alone. The SSR manifest (`.vite/ssr-manifest.json`) is never touched — it has a different schema.
 
 ### Augmented schema
 
@@ -196,18 +196,18 @@ Two fields are added per entry:
 - `integrity` — SRI hash for the entry's primary `file`, when the file is a JS or CSS asset the plugin already hashes.
 - `cssIntegrity` — parallel `(string | null)[]` array aligned 1:1 with `css[]`. A `null` at index `i` means `css[i]` has no hash (non-JS/CSS file, or excluded via `skipResources`).
 
-Example manifest after augmentation:
+Both fields are appended to each entry, so they appear after any existing Vite-emitted keys in the serialized JSON. Example manifest after augmentation:
 
 ```json
 {
   "src/main.tsx": {
     "file": "assets/main-XYZ.js",
-    "integrity": "sha384-...",
     "src": "src/main.tsx",
     "isEntry": true,
     "css": ["assets/main-ABC.css"],
-    "cssIntegrity": ["sha384-..."],
-    "imports": ["_shared-GHI.js"]
+    "imports": ["_shared-GHI.js"],
+    "integrity": "sha384-...",
+    "cssIntegrity": ["sha384-..."]
   },
   "_shared-GHI.js": {
     "file": "_shared-GHI.js",

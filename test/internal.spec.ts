@@ -1854,7 +1854,7 @@ describe("Processing Classes", () => {
 			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
 		});
 
-		it("does not rewrite source when no entries match", () => {
+		it("does not rewrite source or count the file when no entries augment", () => {
 			const logger = createMockBundleLogger();
 			const processor = new ManifestProcessor(logger);
 			const manifest = {
@@ -1871,9 +1871,91 @@ describe("Processing Classes", () => {
 
 			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
 
-			expect(result.processedFiles).toBe(1);
+			expect(result.processedFiles).toBe(0);
 			expect(result.augmentedEntries).toBe(0);
 			expect(bundle[".vite/manifest.json"].source).toBe(originalSource);
+		});
+
+		it("silently ignores a custom *manifest.json that does not look like a Vite manifest", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			// PWA-like web-app manifest also named "...manifest.json" — no `file` fields.
+			const pwaManifest = {
+				name: "My App",
+				short_name: "App",
+				icons: [{ src: "/icon.png", sizes: "192x192" }],
+			};
+			const originalSource = JSON.stringify(pwaManifest);
+			const bundle: any = {
+				"public/app-manifest.json": {
+					type: "asset" as const,
+					fileName: "public/app-manifest.json",
+					source: originalSource,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(bundle["public/app-manifest.json"].source).toBe(originalSource);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("augments a custom-named manifest.json that has Vite manifest shape", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				"custom-manifest.json": makeManifestAsset(
+					"custom-manifest.json",
+					defaultManifest()
+				),
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(1);
+			const updated = JSON.parse(String(bundle["custom-manifest.json"].source));
+			expect(updated["src/main.tsx"].integrity).toBe(SRI_JS_MAIN);
+		});
+
+		it("emits null placeholders for non-string entries inside css[]", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main-XYZ.js",
+					// Simulate a corrupt or unexpected manifest: css contains a non-string.
+					css: ["assets/main-ABC.css", 42, null],
+				},
+			};
+			const bundle: any = {
+				".vite/manifest.json": makeManifestAsset(".vite/manifest.json", manifest),
+			};
+
+			processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
+			expect(updated["src/main.tsx"].cssIntegrity).toEqual([SRI_CSS, null, null]);
+		});
+
+		it("silently skips assets whose source is neither string nor Uint8Array", () => {
+			const logger = createMockBundleLogger();
+			const processor = new ManifestProcessor(logger);
+			const bundle: any = {
+				".vite/manifest.json": {
+					type: "asset" as const,
+					fileName: ".vite/manifest.json",
+					// Exotic source type unlikely in practice; asserts defensive path.
+					source: 42 as any,
+				},
+			};
+
+			const result = processor.injectIntegrity(bundle, defaultSriMap(), []);
+
+			expect(result.processedFiles).toBe(0);
+			expect(result.augmentedEntries).toBe(0);
+			expect(logger.warn).not.toHaveBeenCalled();
 		});
 	});
 

@@ -2016,6 +2016,46 @@ describe("vite-plugin-sri-gen", () => {
 			expect(Object.keys(bundle)).toEqual(["index.html", "assets/main.js"]);
 		});
 
+		it("injects manifest integrity even when the bundle has no HTML (backend-owned HTML scenario)", async () => {
+			// This is the primary use case from issue #23: a Vite build configured
+			// with build.manifest: true but no HTML emission, because the backend
+			// renders its own HTML and only needs the manifest.
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			const manifest = {
+				"src/main.tsx": {
+					file: "assets/main.js",
+					src: "src/main.tsx",
+					isEntry: true,
+					css: ["assets/main.css"],
+				},
+			};
+			const bundle: any = {
+				"assets/main.js": {
+					type: "chunk",
+					fileName: "assets/main.js",
+					code: "console.log('main')",
+				},
+				"assets/main.css": {
+					type: "asset",
+					fileName: "assets/main.css",
+					source: "body{color:red}",
+				},
+				".vite/manifest.json": {
+					type: "asset",
+					fileName: ".vite/manifest.json",
+					source: JSON.stringify(manifest),
+				},
+			};
+
+			await plugin.generateBundle.handler({}, bundle);
+
+			const updated = JSON.parse(
+				String(bundle[".vite/manifest.json"].source)
+			);
+			expect(updated["src/main.tsx"].integrity).toMatch(/^sha256-/);
+			expect(updated["src/main.tsx"].cssIntegrity[0]).toMatch(/^sha256-/);
+		});
+
 		it("honors skipResources when injecting manifest integrity", async () => {
 			const plugin = sri({
 				algorithm: "sha256",
