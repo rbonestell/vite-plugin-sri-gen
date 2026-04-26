@@ -10,6 +10,7 @@
 <a href="https://github.com/rbonestell/vite-plugin-sri-gen/actions/workflows/test.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/rbonestell/vite-plugin-sri-gen/test.yml?branch=main&logo=vite&logoColor=white&label=tests" alt="Test Results"></a>
 <a href="https://app.codecov.io/gh/rbonestell/vite-plugin-sri-gen/"><img src="https://img.shields.io/codecov/c/github/rbonestell/vite-plugin-sri-gen?logo=codecov&logoColor=white" alt="Code Coverage"></a>
 <a href="https://snyk.io/test/github/rbonestell/vite-plugin-sri-gen"><img src="https://img.shields.io/badge/security-monitored-8A2BE2?logo=snyk" alt="Known Vulnerabilities"></a>
+<a href="https://socket.dev/npm/package/vite-plugin-sri-gen"><img src="https://badge.socket.dev/npm/package/vite-plugin-sri-gen" alt="Known Vulnerabilities"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3DA639?logo=opensourceinitiative&logoColor=white" alt="License"></a>
 </p>
 
