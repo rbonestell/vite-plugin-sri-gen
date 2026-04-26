@@ -4113,7 +4113,7 @@ describe("Coverage Gap Closures", () => {
 	describe("extractPathnameFromResourceUrl", () => {
 		it("falls through to normalization when http URL fails to parse", () => {
 			// IPv6 URL with unbalanced bracket throws inside `new URL()`,
-			// exercising the catch on line 191.
+			// exercising the URL-parse catch fallback.
 			const result = extractPathnameFromResourceUrl("https://[invalid");
 			// Falls through to normalizeBundlePath path; leading slash applied.
 			expect(typeof result).toBe("string");
@@ -4185,7 +4185,7 @@ describe("Coverage Gap Closures", () => {
 			const processor = new IntegrityProcessor("sha256", mockLogger);
 
 			// Throwing a plain string from a getter forces the
-			// `error instanceof Error ? ... : String(error)` else branch (line 1058).
+			// `error instanceof Error ? ... : String(error)` else branch.
 			const bundle: any = {
 				"thrower.js": {
 					type: "chunk",
@@ -4208,7 +4208,8 @@ describe("Coverage Gap Closures", () => {
 		it("hits inner computeIntegrity catch when algorithm is invalid", async () => {
 			const mockLogger = createMockBundleLogger();
 			// Cast around the literal type guard; createHash will throw at runtime
-			// when given an unsupported algorithm, exercising lines 1160-1167.
+			// when given an unsupported algorithm, exercising the inner
+			// computeIntegrity catch in processBundleItem.
 			const processor = new IntegrityProcessor(
 				"sha999" as any,
 				mockLogger
@@ -4241,7 +4242,7 @@ describe("Coverage Gap Closures", () => {
 			const idMap = new Map<string, string>();
 
 			// Bundle key is different from dynamicImport so Strategy 2 misses,
-			// but a chunk's `name` matches, satisfying Strategy 3 (lines 1361-1362).
+			// but a chunk's `name` matches, satisfying Strategy 3.
 			const bundle: any = {
 				"chunk-abc.js": {
 					type: "chunk",
@@ -4332,7 +4333,7 @@ describe("Coverage Gap Closures", () => {
 				nodeName: "head",
 				tagName: "head",
 				attrs: [],
-				// childNodes intentionally undefined to drive lines 1797-1799.
+				// childNodes intentionally undefined to drive lazy initialization.
 			};
 
 			const added = (processor as any).addPreloadLinkForChunk(
@@ -4382,7 +4383,7 @@ describe("Coverage Gap Closures", () => {
 				});
 
 				// Trigger wrapped appendChild — the mock node adapter forwards to
-				// maybeSetIntegrity, exercising lines 2470-2495.
+				// maybeSetIntegrity, exercising the inner closures.
 				nodeProto.appendChild(script);
 
 				expect(script.getAttribute("integrity")).toBe("sha256-RTHASH");
@@ -4470,7 +4471,7 @@ describe("Coverage Gap Closures", () => {
 					dependencies
 				);
 
-				// Non-script/non-link element — early-returns (line 2480).
+				// Non-script/non-link element — early-returns from maybeSetIntegrity.
 				const div = mockElements.createElement("div", {
 					id: "x",
 				});
@@ -4478,7 +4479,7 @@ describe("Coverage Gap Closures", () => {
 				expect(div.getAttribute("integrity")).toBeNull();
 
 				// Script with URL not in the SRI map — passes eligibility but
-				// falls through the integrity lookup (line 2491).
+				// falls through the integrity lookup.
 				const unknownScript = mockElements.createScript({
 					src: "/missing.js",
 				});
@@ -4487,7 +4488,7 @@ describe("Coverage Gap Closures", () => {
 				).not.toThrow();
 				expect(unknownScript.getAttribute("integrity")).toBeNull();
 
-				// Null arg — early returns at line 2471.
+				// Null arg — early returns at the top of maybeSetIntegrity.
 				expect(() => nodeProto.appendChild(null)).not.toThrow();
 			} finally {
 				dependencies.mocks.nodeAdapter.restorePrototypes();
@@ -4529,8 +4530,8 @@ describe("Coverage Gap Closures", () => {
 
 				const script = mockElements.createScript({ src: "/foo.js" });
 				expect(() => nodeProto.appendChild(script)).not.toThrow();
-				// URL parsing failed inside getIntegrityForUrl (lines 2461-2464),
-				// so no integrity was applied.
+				// URL parsing failed inside getIntegrityForUrl, so no integrity
+				// was applied.
 				expect(script.getAttribute("integrity")).toBeNull();
 			} finally {
 				dependencies.mocks.nodeAdapter.restorePrototypes();
@@ -4567,20 +4568,20 @@ describe("Coverage Gap Closures", () => {
 					{
 						crossorigin: "anonymous",
 						// Glob with `*` exercises the regex compilation path
-						// inside matchesPatternRuntime (lines 2417-2422).
+						// inside matchesPatternRuntime.
 						skipResources: ["/cdn/*"],
 					},
 					dependencies
 				);
 
-				// src match drives shouldSkipElementRuntime line 2439
+				// src match drives the src-pattern branch of shouldSkipElementRuntime
 				const skippedScript = mockElements.createScript({
 					src: "/cdn/lib.js",
 				});
 				nodeProto.appendChild(skippedScript);
 				expect(skippedScript.getAttribute("integrity")).toBeNull();
 
-				// href match drives shouldSkipElementRuntime line 2440
+				// href match drives the href-pattern branch of shouldSkipElementRuntime
 				const skippedLink = mockElements.createLink({
 					rel: "stylesheet",
 					href: "/cdn/style.css",
@@ -4628,7 +4629,7 @@ describe("Coverage Gap Closures", () => {
 				});
 				nodeProto.appendChild(script);
 				// shouldSkipElementRuntime loop completes without matching,
-				// driving the trailing `return false` (line 2446).
+				// driving the trailing `return false`.
 				expect(script.getAttribute("integrity")).toBe("sha256-KEEP");
 			} finally {
 				dependencies.mocks.nodeAdapter.restorePrototypes();
@@ -4661,7 +4662,7 @@ describe("Coverage Gap Closures", () => {
 					{ "/exact.js": "sha256-EXACT" },
 					{
 						crossorigin: "anonymous",
-						// No wildcard — `pattern === str` short-circuit (line ~2414).
+						// No wildcard — `pattern === str` short-circuit fast path.
 						skipResources: ["/exact.js"],
 					},
 					dependencies
@@ -4683,7 +4684,8 @@ describe("Coverage Gap Closures", () => {
 			const dependencies = createTestDependencies();
 
 			const originalElement = (globalThis as any).Element;
-			// Define a getter that throws on access — exercises line 2534.
+			// Define a getter that throws on access — exercises the
+			// installSriRuntimeWithDeps top-level catch.
 			Object.defineProperty(globalThis, "Element", {
 				configurable: true,
 				get() {
@@ -4858,7 +4860,7 @@ describe("Coverage Gap Closures", () => {
 
 		it("falls back to direct assignment when defineProperty refuses on the prototype", () => {
 			// Cause Object.defineProperty to throw inside wrapInsert so the
-			// catch-and-retry path (line 2332-area) is taken.
+			// direct-assignment fallback path is taken.
 			const originalNode = (globalThis as any).Node;
 			const originalElement = (globalThis as any).Element;
 			const originalDefineProp = Object.defineProperty;
@@ -4911,9 +4913,239 @@ describe("Coverage Gap Closures", () => {
 		});
 	});
 
+	describe("Branch coverage closures", () => {
+		it("extractPathnameFromResourceUrl prepends '/' when normalized lacks leading slash", () => {
+			// Drives the else-branch of the ternary that ensures a leading slash.
+			expect(extractPathnameFromResourceUrl("foo")).toBe("/foo");
+		});
+
+		it("loadResource short-circuits when resourcePath is empty", async () => {
+			expect(await loadResource("", {} as any)).toBeNull();
+			expect(await loadResource(undefined, {} as any)).toBeNull();
+		});
+
+		it("loadResource returns null when bundle is missing for local paths", async () => {
+			expect(await loadResource("/local.js", null as any)).toBeNull();
+		});
+
+		it("loadResource hits the in-memory cache for HTTP URLs", async () => {
+			// Drives the cache-hit branch in the HTTP path.
+			const cache = new Map<string, Uint8Array>();
+			const cached = new Uint8Array([1, 2, 3]);
+			cache.set("https://cdn.example.com/app.js", cached);
+			const result = await loadResource(
+				"https://cdn.example.com/app.js",
+				{} as any,
+				{ cache, enableCache: true }
+			);
+			expect(result).toBe(cached);
+		});
+
+		it("loadResource skips local lookup when normalizeBundlePath yields empty", async () => {
+			// `/` normalizes to "" — driving the empty-relPath guard.
+			expect(await loadResource("/", {} as any)).toBeNull();
+		});
+
+		it("findBundleItem is reached through loadResource basename-fallback strategy", async () => {
+			// Drives the basename-fallback strategies in findBundleItem. Bundle key
+			// ends with the basename but isn't an exact match.
+			const bundle: any = {
+				"assets/foo-DEADBEEF.js": {
+					type: "chunk",
+					code: "console.log('foo')",
+					fileName: "assets/foo-DEADBEEF.js",
+				},
+			};
+			const result = await loadResource(
+				"foo-DEADBEEF.js",
+				bundle as any
+			);
+			expect(typeof result).toBe("string");
+		});
+
+		it("findBundleItem returns null when basename has no last segment", async () => {
+			// `nope/`.split("/").pop() === "" → guard returns null.
+			const bundle: any = { "any.js": { type: "chunk", code: "x" } };
+			expect(
+				await loadResource("nope/", bundle as any)
+			).toBeNull();
+		});
+
+		it("processElement returns early for elements without attrs", async () => {
+			await expect(
+				processElement(
+					{ nodeName: "script" } as any,
+					{} as any,
+					"sha256"
+				)
+			).resolves.toBeUndefined();
+		});
+
+		it("processElement returns early when getUrlAttrName yields null", async () => {
+			// <meta> doesn't have a URL attribute mapping.
+			const meta: Element = {
+				nodeName: "meta",
+				tagName: "meta",
+				attrs: [{ name: "name", value: "viewport" }],
+				namespaceURI: "http://www.w3.org/1999/xhtml" as any,
+				childNodes: [],
+				parentNode: null as any,
+				sourceCodeLocation: undefined,
+			};
+			await expect(
+				processElement(meta, {} as any, "sha256")
+			).resolves.toBeUndefined();
+		});
+
+		it("isEligibleForSri returns false when nodeName or attrs is missing", () => {
+			// Both branches of `!element.nodeName || !element.attrs`.
+			expect(
+				isEligibleForSri({ attrs: [] } as any)
+			).toBe(false);
+			expect(
+				isEligibleForSri({ nodeName: "script" } as any)
+			).toBe(false);
+		});
+
+		it("addSriToHtml logs raw err when err has no message in catch", async () => {
+			// `err?.message || err`: processElement rejects with a string
+			// (no .message), so the right-hand side is logged.
+			const mockLogger = createMockBundleLogger();
+			// Custom bundle item whose source getter throws a non-Error.
+			const bundle: any = {
+				"app.js": {
+					type: "chunk",
+					get code(): string {
+						// eslint-disable-next-line no-throw-literal
+						throw "string-thrown";
+					},
+				},
+			};
+			const html = `<html><head><script src="/app.js"></script></head></html>`;
+			await addSriToHtml(html, bundle as any, mockLogger);
+			// At least one error captured the string fallback path.
+			const captured = mockLogger.error.mock.calls.some(
+				(c: any[]) => c[1] === "string-thrown"
+			);
+			expect(captured).toBe(true);
+		});
+
+		it("addSriToHtml outer catch logs undefined when parse throws non-Error", async () => {
+			// `error instanceof Error ? error : undefined`: when parse5 throws a
+			// non-Error, the second arg to logger.error must be undefined.
+			const mockLogger = createMockBundleLogger();
+			const spy = vi
+				.spyOn(parse5, "parse")
+				.mockImplementationOnce(() => {
+					// eslint-disable-next-line no-throw-literal
+					throw "raw-string-error";
+				});
+			const result = await addSriToHtml(
+				"<html></html>",
+				{} as any,
+				mockLogger
+			);
+			expect(result).toBe("<html></html>");
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Failed to parse HTML with parse5",
+				undefined
+			);
+			spy.mockRestore();
+		});
+
+		it("HtmlProcessor.processHtmlFiles catch handles non-Error throwables", async () => {
+			const mockLogger = createMockBundleLogger();
+			const processor = new HtmlProcessor({
+				algorithm: "sha256" as const,
+				base: "/",
+				preloadDynamicChunks: false,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+				skipResources: [],
+			} as any);
+
+			// Stub addSriToHtmlWithSri so the per-file handler throws a string.
+			const orig = (processor as any).processSingleHtmlFile;
+			(processor as any).processSingleHtmlFile = async () => {
+				// eslint-disable-next-line no-throw-literal
+				throw "html-string-error";
+			};
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: "<!DOCTYPE html><html></html>",
+				},
+			};
+			await processor.processHtmlFiles(bundle, {}, new Set());
+			(processor as any).processSingleHtmlFile = orig;
+
+			const sawNonError = mockLogger.error.mock.calls.some(
+				(c: any[]) =>
+					typeof c[0] === "string" &&
+					c[0].includes("html-string-error") &&
+					c[1] === undefined
+			);
+			expect(sawNonError).toBe(true);
+		});
+
+		it("addDynamicChunkPreloads catch handles non-Error throwables", async () => {
+			const mockLogger = createMockBundleLogger();
+			const processor = new HtmlProcessor({
+				algorithm: "sha256" as const,
+				base: "/",
+				preloadDynamicChunks: true,
+				enableCache: false,
+				fetchTimeoutMs: 0,
+				logger: mockLogger,
+				skipResources: [],
+			} as any);
+			const spy = vi
+				.spyOn(parse5, "parse")
+				.mockImplementationOnce(() => {
+					// eslint-disable-next-line no-throw-literal
+					throw "preload-string-error";
+				});
+			const result = await (processor as any).addDynamicChunkPreloads(
+				"<html><head></head></html>",
+				new Set(["x.js"]),
+				{}
+			);
+			expect(result).toBe("<html><head></head></html>");
+			expect(
+				mockLogger.error.mock.calls.some(
+					(c: any[]) =>
+						typeof c[0] === "string" &&
+						c[0].includes("preload-string-error") &&
+						c[1] === undefined
+				)
+			).toBe(true);
+			spy.mockRestore();
+		});
+
+		it("installSriRuntime tolerates a null sriByPathname argument", () => {
+			// Drives the `sriByPathname || {}` fallback in both runtime variants.
+			expect(() =>
+				installSriRuntime(null as any, {})
+			).not.toThrow();
+			const dependencies = createTestDependencies();
+			expect(() =>
+				installSriRuntimeWithDeps(null as any, {}, dependencies)
+			).not.toThrow();
+			dependencies.mocks.nodeAdapter.restorePrototypes();
+		});
+
+		it("matchesPattern handles empty pattern or empty input", () => {
+			// Public matchesPattern shares the same guard logic.
+			expect(matchesPattern("", "abc")).toBe(false);
+			expect(matchesPattern("abc", "")).toBe(false);
+		});
+	});
+
 	describe("dom-abstraction edge: preload as missing", () => {
 		it("DOMAdapter.isEligibleForSRI returns false for rel=preload with no `as`", () => {
-			// Covers the `getAttribute('as') || ''` short-circuit branch on line 131.
+			// Covers the `getAttribute('as') || ''` short-circuit branch.
 			const adapter = new DOMAdapter();
 			const element = {
 				hasAttribute: (name: string) => name === "href" || name === "rel",
