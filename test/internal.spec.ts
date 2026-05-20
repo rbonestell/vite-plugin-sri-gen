@@ -5162,4 +5162,320 @@ describe("Coverage Gap Closures", () => {
 			expect(adapter.isEligibleForSRI(element)).toBe(false);
 		});
 	});
+
+	describe("installSriRuntime: JS-level dynamic import enforcement", () => {
+		const ORIG = {
+			fetch: (globalThis as any).fetch,
+			location: (globalThis as any).location,
+			sriImport: (globalThis as any).__sriImport,
+			sriNative: (globalThis as any).__sriNativeImport,
+		};
+
+		beforeEach(() => {
+			(globalThis as any).location = { href: "https://app.test/" };
+			delete (globalThis as any).__sriImport;
+			delete (globalThis as any).__sriNativeImport;
+		});
+
+		afterEach(() => {
+			(globalThis as any).fetch = ORIG.fetch;
+			(globalThis as any).location = ORIG.location;
+			(globalThis as any).__sriImport = ORIG.sriImport;
+			(globalThis as any).__sriNativeImport = ORIG.sriNative;
+		});
+
+		async function expectedHash(
+			content: string,
+			algo: "SHA-256" | "SHA-384" | "SHA-512"
+		): Promise<string> {
+			const digest = await crypto.subtle.digest(
+				algo,
+				new TextEncoder().encode(content)
+			);
+			let bin = "";
+			const bytes = new Uint8Array(digest);
+			for (let i = 0; i < bytes.length; i++)
+				bin += String.fromCharCode(bytes[i]);
+			const prefix =
+				algo === "SHA-256"
+					? "sha256"
+					: algo === "SHA-384"
+						? "sha384"
+						: "sha512";
+			return prefix + "-" + btoa(bin);
+		}
+
+		it("does not install __sriImport when the flag is omitted", () => {
+			installSriRuntime({}, {});
+			expect((globalThis as any).__sriImport).toBeUndefined();
+		});
+
+		it("installs __sriImport when enforceDynamicImports is true", () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			expect(typeof (globalThis as any).__sriImport).toBe("function");
+			expect(typeof (globalThis as any).__sriNativeImport).toBe(
+				"function"
+			);
+		});
+
+		it("__sriImport refuses when no integrity is registered for the URL", async () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/unknown.js"
+				)
+			).rejects.toThrow(/no integrity registered/i);
+		});
+
+		it("__sriImport verifies hash and delegates to the native import on match", async () => {
+			const content = "export const v = 1;";
+			const integrity = await expectedHash(content, "SHA-256");
+
+			(globalThis as any).fetch = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode(content).buffer,
+			}));
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+
+			const calls: string[] = [];
+			(globalThis as any).__sriNativeImport = (u: string) => {
+				calls.push(u);
+				return Promise.resolve({ ok: true });
+			};
+
+			const result = await (globalThis as any).__sriImport(
+				"https://app.test/assets/lazy.js"
+			);
+			expect(result).toEqual({ ok: true });
+			expect(calls).toEqual(["https://app.test/assets/lazy.js"]);
+		});
+
+		it("__sriImport throws on hash mismatch and does not delegate to native import", async () => {
+			const integrity =
+				"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+			(globalThis as any).fetch = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode("tampered").buffer,
+			}));
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+
+			const native = vi.fn(() => Promise.resolve({}));
+			(globalThis as any).__sriNativeImport = native;
+
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/lazy.js"
+				)
+			).rejects.toThrow(/integrity verification failed/i);
+			expect(native).not.toHaveBeenCalled();
+		});
+
+		it("__sriImport throws when the fetch response is not ok", async () => {
+			const integrity = await expectedHash("ok", "SHA-384");
+			(globalThis as any).fetch = vi.fn(async () => ({
+				ok: false,
+				status: 503,
+				arrayBuffer: async () => new ArrayBuffer(0),
+			}));
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/lazy.js"
+				)
+			).rejects.toThrow(/HTTP 503/);
+		});
+
+		it("__sriImport throws on unsupported integrity algorithm", async () => {
+			installSriRuntime(
+				{ "/assets/lazy.js": "md5-deadbeef" },
+				{ enforceDynamicImports: true }
+			);
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/lazy.js"
+				)
+			).rejects.toThrow(/unsupported integrity algorithm/i);
+		});
+
+		it("__sriImport sends credentials='include' when crossorigin is use-credentials", async () => {
+			const content = "export const v = 1;";
+			const integrity = await expectedHash(content, "SHA-256");
+			const fetchSpy = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode(content).buffer,
+			}));
+			(globalThis as any).fetch = fetchSpy;
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{
+					enforceDynamicImports: true,
+					crossorigin: "use-credentials",
+				}
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({});
+
+			await (globalThis as any).__sriImport(
+				"https://app.test/assets/lazy.js"
+			);
+
+			expect(fetchSpy).toHaveBeenCalledWith(
+				"https://app.test/assets/lazy.js",
+				expect.objectContaining({ credentials: "include" })
+			);
+		});
+
+		it("__sriImport sends credentials='same-origin' for anonymous (matching <script crossorigin=anonymous>)", async () => {
+			const content = "export const v = 2;";
+			const integrity = await expectedHash(content, "SHA-256");
+			const fetchSpy = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode(content).buffer,
+			}));
+			(globalThis as any).fetch = fetchSpy;
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{
+					enforceDynamicImports: true,
+					crossorigin: "anonymous",
+				}
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({});
+
+			await (globalThis as any).__sriImport(
+				"https://app.test/assets/lazy.js"
+			);
+
+			expect(fetchSpy).toHaveBeenCalledWith(
+				"https://app.test/assets/lazy.js",
+				expect.objectContaining({ credentials: "same-origin" })
+			);
+		});
+
+		it("__sriImport defaults to credentials='same-origin' when crossorigin is unset", async () => {
+			const content = "export const v = 3;";
+			const integrity = await expectedHash(content, "SHA-256");
+			const fetchSpy = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode(content).buffer,
+			}));
+			(globalThis as any).fetch = fetchSpy;
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true, crossorigin: false as any }
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({});
+
+			await (globalThis as any).__sriImport(
+				"https://app.test/assets/lazy.js"
+			);
+
+			expect(fetchSpy).toHaveBeenCalledWith(
+				"https://app.test/assets/lazy.js",
+				expect.objectContaining({ credentials: "same-origin" })
+			);
+		});
+
+		it("installSriRuntime is idempotent: a second install with our own function is accepted", () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			const first = (globalThis as any).__sriImport;
+			expect(typeof first).toBe("function");
+			// A subsequent install in the same realm must not throw — the
+			// existing function is tagged as ours.
+			expect(() =>
+				installSriRuntime(
+					{ "/x.js": "sha256-zzz" },
+					{ enforceDynamicImports: true }
+				)
+			).not.toThrow();
+			expect(typeof (globalThis as any).__sriImport).toBe("function");
+		});
+
+		it("installSriRuntime refuses to install when __sriImport is pre-set by foreign code", () => {
+			// Simulate an attacker (or unrelated script) that defined a
+			// passthrough on globalThis BEFORE our runtime executes.
+			(globalThis as any).__sriImport = (u: string) => Promise.resolve(u);
+			expect(() =>
+				installSriRuntime(
+					{ "/x.js": "sha256-aaa" },
+					{ enforceDynamicImports: true }
+				)
+			).toThrow(/pre-installation tampering|already defined by another script/i);
+		});
+
+		it("installSriRuntime refuses to install when __sriNativeImport is pre-set by foreign code", () => {
+			(globalThis as any).__sriNativeImport = (u: string) =>
+				Promise.resolve(u);
+			expect(() =>
+				installSriRuntime(
+					{ "/x.js": "sha256-aaa" },
+					{ enforceDynamicImports: true }
+				)
+			).toThrow(/__sriNativeImport is already defined by another script/i);
+		});
+
+		it("__sriNativeImport delegates to the platform's native dynamic import", async () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			const native = (globalThis as any).__sriNativeImport;
+			// data: URL imports work in Node's loader and exercise the
+			// installed arrow function's body, not just a test stub.
+			const dataUrl =
+				"data:text/javascript;base64," +
+				Buffer.from("export default 7;").toString("base64");
+			const mod = await native(dataUrl);
+			expect(mod.default).toBe(7);
+		});
+
+		it("__sriImport throws a clear error when crypto.subtle is unavailable (non-secure context)", async () => {
+			installSriRuntime(
+				{ "/assets/lazy.js": "sha256-abc" },
+				{ enforceDynamicImports: true }
+			);
+
+			// Stub crypto so subtle is unreachable, simulating a non-secure
+			// context (HTTP page). vi.stubGlobal lets us swap the getter-backed
+			// crypto without tripping the read-only descriptor.
+			const origCrypto = (globalThis as any).crypto;
+			try {
+				vi.stubGlobal("crypto", { subtle: undefined });
+				await expect(
+					(globalThis as any).__sriImport(
+						"https://app.test/assets/lazy.js"
+					)
+				).rejects.toThrow(
+					/crypto\.subtle is unavailable.*secure context/i
+				);
+			} finally {
+				vi.stubGlobal("crypto", origCrypto);
+			}
+		});
+	});
 });

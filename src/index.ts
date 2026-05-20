@@ -38,6 +38,31 @@ export interface SriPluginOptions {
 let logger: BundleLogger;
 
 /**
+ * Pattern matching JavaScript dynamic `import(` call sites while excluding:
+ *   - the static `import` declaration form (no following `(`),
+ *   - `import.meta` accesses (no following `(`),
+ *   - method or property accesses such as `foo.import(` (preceded by `.`),
+ *   - identifiers like `myimport(` or `$import(` (preceded by word char or `$`).
+ *
+ * The negative lookbehind keeps the rewrite surgical: only the call-expression
+ * form of `import` is replaced.
+ */
+const DYNAMIC_IMPORT_CALL_RE = /(?<![.\w$])import\s*\(/g;
+
+/**
+ * Rewrites every dynamic `import(...)` call expression in a chunk to
+ * `__sriImport(...)` so the runtime-injected JS-level verifier can enforce
+ * integrity before executing the module. The original `import(` syntax inside
+ * the runtime itself is preserved because the runtime is concatenated AFTER
+ * this rewrite step.
+ */
+export function rewriteDynamicImports(code: string): string {
+	if (!code || typeof code !== "string") return code;
+	if (code.indexOf("import") === -1) return code;
+	return code.replace(DYNAMIC_IMPORT_CALL_RE, "__sriImport(");
+}
+
+/**
  * Vite plugin to add Subresource Integrity (SRI) attributes to external assets in index.html
  * ESM-only, requires Node 18+ (uses global fetch)
  *
@@ -168,6 +193,53 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					//   3) Hash entry chunks (now includes the injected runtime)
 					// - When disabled, we can hash everything in a single pass for efficiency
 					if (runtimePatchDynamicLinks) {
+						// Step 2a-pre: Rewrite dynamic import() call sites when
+						// JS-level enforcement is active. This is performed BEFORE
+						// any hashing so the served bytes match the hashed bytes.
+						// Activation condition: the user has disabled the
+						// build-time modulepreload injection (preloadDynamicChunks
+						// is false), which means browser-native SRI on
+						// modulepreload cannot be relied upon to protect lazy
+						// chunks. In that case we substitute the global SRI
+						// verifier injected by the runtime so every dynamic
+						// import goes through a strict, in-JS integrity check.
+						const enforceDynamicImports = !preloadDynamicChunks;
+						if (enforceDynamicImports) {
+							// ORDERING INVARIANT: this rewrite MUST run before
+							// any hashing AND before the runtime is injected
+							// into entry chunks. The runtime contains its own
+							// `import(/* @vite-ignore */ url)` calls (preserved
+							// as the native-import escape hatch); rewriting it
+							// would cause infinite recursion at runtime. The
+							// hash-then-serve contract also requires that the
+							// rewritten bytes are the bytes we hash.
+							logger.info(
+								"Rewriting dynamic import() calls to enforce SRI in JavaScript"
+							);
+							let rewrittenChunks = 0;
+							for (const bundleItem of Object.values(bundle)) {
+								if (bundleItem.type !== "chunk") continue;
+								const rewritten = rewriteDynamicImports(
+									bundleItem.code
+								);
+								if (rewritten !== bundleItem.code) {
+									bundleItem.code = rewritten;
+									// Invalidate the source map: byte offsets
+									// have shifted by 5 characters per match
+									// and the existing mappings are no longer
+									// accurate. Downstream consumers will fall
+									// back to no source map for these chunks.
+									(bundleItem as any).map = null;
+									rewrittenChunks++;
+								}
+							}
+							if (rewrittenChunks > 0) {
+								logger.info(
+									`Rewrote dynamic import() calls in ${rewrittenChunks} chunk(s)`
+								);
+							}
+						}
+
 						// Step 2a: Compute hashes for NON-ENTRY chunks first
 						// These hashes will be embedded in the runtime injected into entry chunks
 						logger.info(
@@ -182,7 +254,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						const serializedMap = JSON.stringify(nonEntryHashes);
 						const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
 						const serializedSkipPatterns = JSON.stringify(skipResources);
-						const runtimeCode = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns} });\n`;
+						const runtimeCode = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${enforceDynamicImports} });\n`;
 
 						for (const [fileName, bundleItem] of Object.entries(bundle)) {
 							if (bundleItem.type === "chunk" && bundleItem.isEntry) {

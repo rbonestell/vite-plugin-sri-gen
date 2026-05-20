@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import sri from "../src/index";
+import sri, { rewriteDynamicImports } from "../src/index";
 import { installSriRuntime, installSriRuntimeWithDeps } from "../src/internal";
 import {
 	createMockPluginContext,
@@ -2092,6 +2092,267 @@ describe("vite-plugin-sri-gen", () => {
 			const updated = JSON.parse(String(bundle[".vite/manifest.json"].source));
 			expect(updated["src/main.tsx"].integrity).toBeUndefined();
 			expect(updated["_shared.js"].integrity).toMatch(/^sha256-/);
+		});
+	});
+
+	describe("dynamic import SRI enforcement", () => {
+		it("rewriteDynamicImports replaces call-form import while leaving static syntax intact", () => {
+			const input = [
+				"import x from 'a';",
+				"const m = import('./lazy.js');",
+				"const n = import ( './lazy2.js' );",
+				"console.log(import.meta.url);",
+				"obj.import('./should-not-touch.js');",
+				"const s = 'import(\"literal\")';",
+			].join("\n");
+
+			const out = rewriteDynamicImports(input);
+
+			expect(out).toContain("import x from 'a';");
+			expect(out).toContain("__sriImport('./lazy.js')");
+			expect(out).toContain("__sriImport( './lazy2.js' )");
+			expect(out).toContain("import.meta.url");
+			expect(out).toContain("obj.import('./should-not-touch.js')");
+			// String literals are an accepted false-positive surface; ensure it
+			// at least does not corrupt the file structure.
+			expect(out.split("\n").length).toBe(input.split("\n").length);
+		});
+
+		it("rewriteDynamicImports is a no-op when the input has no import token", () => {
+			expect(rewriteDynamicImports("const a = 1;\nfoo();\n")).toBe(
+				"const a = 1;\nfoo();\n"
+			);
+			expect(rewriteDynamicImports("")).toBe("");
+		});
+
+		it("rewrites import() in chunks and enables enforceDynamicImports in the runtime when preload injection is disabled", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+				runtimePatchDynamicLinks: true,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js'); console.log(p);",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk(
+					"assets/lazy.js",
+					"src/lazy.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain("__sriImport('./lazy.js')");
+			expect(entryCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/lazy\.js/);
+			expect(entryCode).toContain("enforceDynamicImports: true");
+			expect(entryCode).toContain("installSriRuntime");
+		});
+
+		it("does not rewrite import() or enable enforcement when preload injection is enabled (default)", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				runtimePatchDynamicLinks: true,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk(
+					"assets/lazy.js",
+					"src/lazy.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain("import('./lazy.js')");
+			expect(entryCode).toContain("enforceDynamicImports: false");
+		});
+
+		it("does not rewrite import() when runtime patching is disabled", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+				runtimePatchDynamicLinks: false,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+				}),
+				"assets/lazy.js": makeDynChunk("assets/lazy.js"),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain("import('./lazy.js')");
+			expect(entryCode).not.toContain("installSriRuntime");
+		});
+
+		it("rewrites import() in non-entry chunks too (lazy chunk that imports another lazy chunk)", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const a = import('./outer.js');",
+				}),
+				"assets/outer.js": makeDynChunk(
+					"assets/outer.js",
+					"src/outer.ts"
+				),
+				"assets/inner.js": makeDynChunk(
+					"assets/inner.js",
+					"src/inner.ts"
+				),
+			} as any;
+			(bundle["assets/outer.js"] as Chunk).code =
+				"const b = import('./inner.js'); export default b;";
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const outerCode = (bundle["assets/outer.js"] as Chunk).code;
+			expect(outerCode).toContain("__sriImport('./inner.js')");
+			expect(outerCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/inner\.js/);
+		});
+
+		it("invalidates source maps for chunks whose code was rewritten", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const entry = makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+			}) as any;
+			entry.map = { version: 3, sources: ["entry.ts"], mappings: "AAAA" };
+			const lazy = makeDynChunk("assets/lazy.js") as any;
+			lazy.map = { version: 3, sources: ["lazy.ts"], mappings: "AAAA" };
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": entry,
+				"assets/lazy.js": lazy,
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			expect(entry.map).toBeNull();
+			// The lazy chunk had no `import(` to rewrite — its map should be left alone.
+			expect(lazy.map).not.toBeNull();
+		});
+
+		it("rewrites import() across every entry in a multi-entry bundle", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"about.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry-a.js": makeEntryChunk({
+					fileName: "assets/entry-a.js",
+					code: "const a = import('./shared.js');",
+					name: "entry-a",
+					facadeModuleId: "src/a.ts",
+				}),
+				"assets/entry-b.js": makeEntryChunk({
+					fileName: "assets/entry-b.js",
+					code: "const b = import('./shared.js');",
+					name: "entry-b",
+					facadeModuleId: "src/b.ts",
+				}),
+				"assets/shared.js": makeDynChunk(
+					"assets/shared.js",
+					"src/shared.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const aCode = (bundle["assets/entry-a.js"] as Chunk).code;
+			const bCode = (bundle["assets/entry-b.js"] as Chunk).code;
+			expect(aCode).toContain("__sriImport('./shared.js')");
+			expect(bCode).toContain("__sriImport('./shared.js')");
+			expect(aCode).toContain("installSriRuntime");
+			expect(bCode).toContain("installSriRuntime");
+		});
+
+		it("rewriter does not match identifiers ending in 'import' or property-access forms", () => {
+			const input = `obj.import('./x.js'); _import('./z.js'); $import('./w.js'); myimport('./q.js');`;
+			const out = rewriteDynamicImports(input);
+			expect(out).toContain("obj.import('./x.js')");
+			expect(out).toContain("_import('./z.js')");
+			expect(out).toContain("$import('./w.js')");
+			expect(out).toContain("myimport('./q.js')");
+			// Confirm no rewrite happened anywhere.
+			expect(out).not.toContain("__sriImport");
+		});
+
+		it("entry chunk hash reflects post-rewrite, post-runtime bytes (round-trip)", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+			}) as any;
+			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": {
+					type: "asset",
+					source: htmlDoc(
+						'<script type="module" src="/assets/entry.js"></script>'
+					),
+				},
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk(
+					"assets/lazy.js",
+					"src/lazy.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const html = String((bundle["index.html"] as Asset).source);
+			const match = html.match(
+				/src="\/assets\/entry\.js"[^>]*integrity="(sha256-[A-Za-z0-9+/=]+)"/
+			);
+			expect(match).not.toBeNull();
+
+			const finalCode = (bundle["assets/entry.js"] as Chunk).code;
+			const expected = match![1];
+			const digest = await crypto.subtle.digest(
+				"SHA-256",
+				new TextEncoder().encode(finalCode)
+			);
+			let bin = "";
+			const bytes = new Uint8Array(digest);
+			for (let i = 0; i < bytes.length; i++)
+				bin += String.fromCharCode(bytes[i]);
+			const actual = "sha256-" + btoa(bin);
+			expect(actual).toBe(expected);
 		});
 	});
 });
