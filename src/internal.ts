@@ -2095,8 +2095,14 @@ export function installSriRuntime(
 	opts?: {
 		crossorigin?: false | "anonymous" | "use-credentials";
 		skipResources?: string[];
+		enforceDynamicImports?: boolean;
 	}
 ) {
+	// Sentinel that escapes the outer best-effort catch. Enforcement-install
+	// failures (foreign global takeover, environment missing crypto.subtle)
+	// MUST surface to the caller — they indicate a security-relevant problem,
+	// not the kind of advisory failure the outer catch is designed to absorb.
+	let enforcementError: Error | undefined;
 	try {
 		// ========================================================================
 		// INITIALIZATION AND CONFIGURATION
@@ -2273,6 +2279,145 @@ export function installSriRuntime(
 		};
 
 		// ========================================================================
+		// JAVASCRIPT-LEVEL DYNAMIC IMPORT VERIFICATION
+		// ========================================================================
+		// Install before DOM patching so the helper is available even in
+		// environments without DOM globals (Workers, SSR runtimes), where the
+		// subsequent DOM patch block would otherwise short-circuit via the
+		// outer catch.
+		if (opts && (opts as any).enforceDynamicImports) try {
+			const g: any = globalThis as any;
+			const subtleAlgoFor = (integrity: string): string | null => {
+				const dash = integrity.indexOf("-");
+				if (dash <= 0) return null;
+				const prefix = integrity.slice(0, dash);
+				if (prefix === "sha256") return "SHA-256";
+				if (prefix === "sha384") return "SHA-384";
+				if (prefix === "sha512") return "SHA-512";
+				return null;
+			};
+			const bytesToBase64 = (bytes: Uint8Array): string => {
+				let binary = "";
+				const chunkSize = 0x8000;
+				for (let i = 0; i < bytes.length; i += chunkSize) {
+					binary += String.fromCharCode.apply(
+						null,
+						bytes.subarray(i, i + chunkSize) as any
+					);
+				}
+				return btoa(binary);
+			};
+			const sriImport = async function (url: string): Promise<any> {
+				// Fail closed if the crypto primitive is unavailable. Browsers
+				// only expose crypto.subtle in secure contexts (HTTPS or
+				// localhost). A clear error beats a confusing TypeError.
+				if (
+					typeof crypto === "undefined" ||
+					!(crypto as any).subtle ||
+					typeof btoa === "undefined"
+				) {
+					throw new Error(
+						"[vite-plugin-sri-gen] Cannot verify dynamic import for " +
+							url +
+							": crypto.subtle is unavailable (requires a secure context, e.g. HTTPS or localhost)"
+					);
+				}
+				const expected = getIntegrityForUrl(url);
+				if (!expected) {
+					throw new Error(
+						"[vite-plugin-sri-gen] Refusing dynamic import: no integrity registered for " +
+							url
+					);
+				}
+				const subtleAlgo = subtleAlgoFor(expected);
+				if (!subtleAlgo) {
+					throw new Error(
+						"[vite-plugin-sri-gen] Unsupported integrity algorithm: " +
+							expected
+					);
+				}
+				// Match the credentials semantics of <script crossorigin=...>
+				// per HTML §2.6.10: "anonymous" => mode cors + credentials
+				// "same-origin"; "use-credentials" => credentials "include".
+				// When crossorigin is unset, fall through to "same-origin" as
+				// the conservative default — this matches browser behavior for
+				// modulepreload links without an explicit crossorigin attr.
+				const init: any = {};
+				if (cors === "use-credentials") init.credentials = "include";
+				else init.credentials = "same-origin";
+				const response = await fetch(url, init);
+				if (!response.ok) {
+					throw new Error(
+						"[vite-plugin-sri-gen] Failed to fetch " +
+							url +
+							" for integrity verification (HTTP " +
+							response.status +
+							")"
+					);
+				}
+				const buffer = await response.arrayBuffer();
+				const digest = await crypto.subtle.digest(subtleAlgo, buffer);
+				const actual =
+					expected.slice(0, expected.indexOf("-") + 1) +
+					bytesToBase64(new Uint8Array(digest));
+				if (actual !== expected) {
+					throw new Error(
+						"[vite-plugin-sri-gen] Integrity verification failed for " +
+							url +
+							" (expected " +
+							expected +
+							", got " +
+							actual +
+							")"
+					);
+				}
+				return g.__sriNativeImport
+					? g.__sriNativeImport(url)
+					: import(/* @vite-ignore */ url);
+			};
+			// Detect pre-installation tampering: if either global is already
+			// set and was NOT installed by this plugin, refuse to proceed.
+			// This closes the obvious bypass where an inline <script> tag (or
+			// an earlier-loaded third-party script such as a tag manager)
+			// pre-defines `__sriImport` with a passthrough function, knowing
+			// our former `if (!g.__sriImport)` guard would skip installation.
+			//
+			// We do NOT defend against post-install replacement of these
+			// globals: code that runs after the entry chunk has already won
+			// — it can call the platform's native `import()` directly, since
+			// only build-time bundle bytes were rewritten. The realistic
+			// threat we defend against is pre-installation, which this check
+			// addresses by failing closed.
+			const TAG = "__vitePluginSriGen";
+			const isOurs = (fn: any): boolean =>
+				!!fn && (fn as any)[TAG] === true;
+			if (g.__sriImport && !isOurs(g.__sriImport)) {
+				throw new Error(
+					"[vite-plugin-sri-gen] Refusing to install: globalThis.__sriImport is already defined by another script. This indicates a pre-installation tampering attempt; dynamic import enforcement cannot proceed."
+				);
+			}
+			if (
+				g.__sriNativeImport &&
+				!isOurs(g.__sriNativeImport)
+			) {
+				throw new Error(
+					"[vite-plugin-sri-gen] Refusing to install: globalThis.__sriNativeImport is already defined by another script."
+				);
+			}
+			const nativeImport: any = (u: string) =>
+				import(/* @vite-ignore */ u);
+			(nativeImport as any)[TAG] = true;
+			(sriImport as any)[TAG] = true;
+			g.__sriNativeImport = nativeImport;
+			g.__sriImport = sriImport;
+		} catch (e) {
+			// Capture and re-throw after the outer best-effort catch so
+			// foreign-takeover / unsupported-environment errors surface
+			// instead of being silenced. DOM patches still run below.
+			enforcementError = e instanceof Error ? e : new Error(String(e));
+		}
+
+		// ========================================================================
 		// SETATTRIBUTE PATCHING
 		// ========================================================================
 
@@ -2368,6 +2513,7 @@ export function installSriRuntime(
 		// Ignore all errors at the top level to prevent runtime failures
 		// The runtime SRI injection is an enhancement, not a requirement
 	}
+	if (enforcementError) throw enforcementError;
 }
 
 /**
