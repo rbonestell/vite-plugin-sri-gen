@@ -2371,9 +2371,9 @@ export function installSriRuntime(
 							")"
 					);
 				}
-				return g.__sriNativeImport
-					? g.__sriNativeImport(url)
-					: import(/* @vite-ignore */ url);
+				// __sriNativeImport is installed below before sriImport is
+				// invoked for the first time, so we can call it directly.
+				return g.__sriNativeImport(url);
 			};
 			// Detect pre-installation tampering: if either global is already
 			// set and was NOT installed by this plugin, refuse to proceed.
@@ -2414,7 +2414,9 @@ export function installSriRuntime(
 			// Capture and re-throw after the outer best-effort catch so
 			// foreign-takeover / unsupported-environment errors surface
 			// instead of being silenced. DOM patches still run below.
-			enforcementError = e instanceof Error ? e : new Error(String(e));
+			// All throws inside the enforcement-install block are Error
+			// instances we construct, so no wrapping is needed.
+			enforcementError = e as Error;
 		}
 
 		// ========================================================================

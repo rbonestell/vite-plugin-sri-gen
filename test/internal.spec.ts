@@ -5430,5 +5430,52 @@ describe("Coverage Gap Closures", () => {
 				)
 			).toThrow(/pre-installation tampering|already defined by another script/i);
 		});
+
+		it("installSriRuntime refuses to install when __sriNativeImport is pre-set by foreign code", () => {
+			(globalThis as any).__sriNativeImport = (u: string) =>
+				Promise.resolve(u);
+			expect(() =>
+				installSriRuntime(
+					{ "/x.js": "sha256-aaa" },
+					{ enforceDynamicImports: true }
+				)
+			).toThrow(/__sriNativeImport is already defined by another script/i);
+		});
+
+		it("__sriNativeImport delegates to the platform's native dynamic import", async () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			const native = (globalThis as any).__sriNativeImport;
+			// data: URL imports work in Node's loader and exercise the
+			// installed arrow function's body, not just a test stub.
+			const dataUrl =
+				"data:text/javascript;base64," +
+				Buffer.from("export default 7;").toString("base64");
+			const mod = await native(dataUrl);
+			expect(mod.default).toBe(7);
+		});
+
+		it("__sriImport throws a clear error when crypto.subtle is unavailable (non-secure context)", async () => {
+			installSriRuntime(
+				{ "/assets/lazy.js": "sha256-abc" },
+				{ enforceDynamicImports: true }
+			);
+
+			// Stub crypto so subtle is unreachable, simulating a non-secure
+			// context (HTTP page). vi.stubGlobal lets us swap the getter-backed
+			// crypto without tripping the read-only descriptor.
+			const origCrypto = (globalThis as any).crypto;
+			try {
+				vi.stubGlobal("crypto", { subtle: undefined });
+				await expect(
+					(globalThis as any).__sriImport(
+						"https://app.test/assets/lazy.js"
+					)
+				).rejects.toThrow(
+					/crypto\.subtle is unavailable.*secure context/i
+				);
+			} finally {
+				vi.stubGlobal("crypto", origCrypto);
+			}
+		});
 	});
 });
