@@ -1,5 +1,6 @@
+import vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import sri, { rewriteDynamicImports } from "../src/index";
+import sri, { buildSriRuntimeCode, rewriteDynamicImports } from "../src/index";
 import { installSriRuntime, installSriRuntimeWithDeps } from "../src/internal";
 import {
 	createMockPluginContext,
@@ -2354,5 +2355,118 @@ describe("vite-plugin-sri-gen", () => {
 			const actual = "sha256-" + btoa(bin);
 			expect(actual).toBe(expected);
 		});
+	});
+});
+
+describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () => {
+	it("installs the global even when the serialized runtime references esbuild's __name helper", () => {
+		// The plugin is bundled with esbuild's keepNames transform, which wraps
+		// named function expressions in a module-scoped `__name(fn, "name")`
+		// helper. That helper is NOT part of `installSriRuntime.toString()`, so
+		// the injected copy references an undefined `__name`. The runtime's
+		// best-effort try/catch then swallows the ReferenceError, leaving
+		// `__sriImport` uninstalled (issue #30). Simulate that exact shape.
+		const runtimeWithKeepNames = function fakeRuntime() {
+			// @ts-expect-error `__name` is injected by esbuild in the real build
+			const tagged = __name(function inner() {}, "inner");
+			(globalThis as any).__sriImport = tagged;
+		} as unknown as typeof installSriRuntime;
+
+		// Control: the raw serialized function throws because `__name` is unbound.
+		const control: any = {};
+		vm.createContext(control);
+		expect(() =>
+			vm.runInContext(`(${runtimeWithKeepNames.toString()})({}, {})`, control)
+		).toThrow(/__name/);
+
+		// buildSriRuntimeCode must make the injected runtime self-contained.
+		const code = buildSriRuntimeCode(
+			runtimeWithKeepNames,
+			{ "/a.js": "sha384-x" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+			}
+		);
+		const sandbox: any = {};
+		vm.createContext(sandbox);
+		expect(() => vm.runInContext(code, sandbox)).not.toThrow();
+		expect(typeof sandbox.__sriImport).toBe("function");
+	});
+
+	it("installs globalThis.__sriImport from the real runtime when enforcement is enabled", () => {
+		// Positive/smoke test for the real runtime. Note: vitest transforms `src`
+		// without esbuild's keepNames, so the real `installSriRuntime.toString()`
+		// here contains no `__name`; this test therefore passes with or without
+		// the shim. The preceding test (synthetic `__name`) is the actual
+		// regression guard for issue #30.
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/chunk.js": "sha384-abc" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+			}
+		);
+		// Minimal DOM constructors so the runtime's post-install patching has
+		// prototypes to wrap. They are deliberately incomplete; any DOM-patch
+		// error after install is swallowed by the runtime's try/catch, and the
+		// assertion below only checks that `__sriImport` was installed (which
+		// happens before the DOM patching).
+		function El(this: any) {}
+		El.prototype.setAttribute = function () {};
+		function NodeCtor(this: any) {}
+		NodeCtor.prototype = {};
+		const sandbox: any = {
+			Element: El,
+			Node: NodeCtor,
+			HTMLLinkElement: function Link(this: any) {},
+			HTMLScriptElement: function Script(this: any) {},
+		};
+		vm.createContext(sandbox);
+		expect(() => vm.runInContext(code, sandbox)).not.toThrow();
+		expect(typeof sandbox.__sriImport).toBe("function");
+	});
+
+	it("preserves the runtime arguments and the installSriRuntime source", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/a.js": "sha384-x" },
+			{
+				crossorigin: "use-credentials",
+				skipResources: ["analytics-*"],
+				enforceDynamicImports: false,
+			}
+		);
+		expect(code).toContain("installSriRuntime");
+		expect(code).toContain('crossorigin: "use-credentials"');
+		expect(code).toContain('skipResources: ["analytics-*"]');
+		expect(code).toContain("enforceDynamicImports: false");
+		expect(code).toContain('{"/a.js":"sha384-x"}');
+	});
+
+	it("escapes `<` in serialized data so it cannot break out of the injected script", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/a</script>b.js": "sha384-x", "/normal path.js": "sha384-y" },
+			{
+				crossorigin: undefined,
+				skipResources: ["x<y"],
+				enforceDynamicImports: true,
+			}
+		);
+		// `<` is rewritten to its < escape; the raw sequence must not survive.
+		expect(code).not.toContain("</script>");
+		expect(code).toContain("\\u003c/script>");
+		expect(code).toContain("x\\u003cy");
+		// Non-`<` content (spaces, slashes) is left untouched.
+		expect(code).toContain("/normal path.js");
+		// The escape is the standard JS form, so the runtime parses it back to `<`.
+		const sandbox: any = {};
+		vm.createContext(sandbox);
+		vm.runInContext('globalThis.r = "\\u003c/script>";', sandbox);
+		expect(sandbox.r).toBe("</script>");
 	});
 });

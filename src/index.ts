@@ -63,6 +63,60 @@ export function rewriteDynamicImports(code: string): string {
 }
 
 /**
+ * Builds the self-contained runtime statement that is prepended to entry
+ * chunks. The runtime is shipped by serializing `installSriRuntime` with
+ * `.toString()` and embedding the source into the consumer's bundle.
+ *
+ * The plugin itself is bundled with esbuild (via tsup), whose `keepNames`
+ * transform can wrap named function expressions in a module-scoped
+ * `__name(fn, "name")` helper. That helper lives at the top of the plugin's
+ * own output — NOT inside the serialized function — so the injected copy
+ * references an `__name` that is undefined in the consumer bundle. Because the
+ * runtime guards its setup in a best-effort `try/catch`, the resulting
+ * `ReferenceError: __name is not defined` is swallowed and
+ * `globalThis.__sriImport` is never installed; every rewritten dynamic import
+ * then fails with "`__sriImport` is not defined" (issue #30).
+ *
+ * To keep the injected runtime correct regardless of how the plugin is
+ * bundled, the serialized function is evaluated inside a wrapper that defines a
+ * local `__name` shim in its lexical scope. `__name` only needs to return its
+ * first argument; the function-name assignment it performs is cosmetic.
+ */
+export function buildSriRuntimeCode(
+	runtime: (
+		sriByPathname: Record<string, string>,
+		opts?: Record<string, unknown>
+	) => void,
+	sriByPathname: Record<string, string>,
+	opts: {
+		crossorigin: "anonymous" | "use-credentials" | undefined;
+		skipResources: string[];
+		enforceDynamicImports: boolean;
+	}
+): string {
+	// `JSON.stringify` does not escape `<` or the U+2028/U+2029 line separators.
+	// The serialized data is embedded as a JS string literal inside code that is
+	// prepended to a chunk, so escape those characters to keep the injected
+	// statement well-formed (and safe if a chunk is ever inlined into HTML).
+	// This only changes the source representation; the parsed runtime values are
+	// identical.
+	const escapeForScript = (json: string): string =>
+		json
+			.replace(/</g, "\\u003c")
+			.replace(/\u2028/g, "\\u2028")
+			.replace(/\u2029/g, "\\u2029");
+	const serializedMap = escapeForScript(JSON.stringify(sriByPathname));
+	const cors = opts.crossorigin ? JSON.stringify(opts.crossorigin) : "false";
+	const serializedSkipPatterns = escapeForScript(
+		JSON.stringify(opts.skipResources)
+	);
+	const args = `${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${opts.enforceDynamicImports} }`;
+	// Self-containment shim — see the doc comment above for why this is needed.
+	const shim = "var __name=function(fn){return fn;};";
+	return `\n(function(){${shim}return (${runtime.toString()});})()(${args});\n`;
+}
+
+/**
  * Vite plugin to add Subresource Integrity (SRI) attributes to external assets in index.html
  * ESM-only, requires Node 18+ (uses global fetch)
  *
@@ -251,10 +305,15 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// Step 2b: Inject runtime into entry chunks (BEFORE hashing entry chunks)
 						// The runtime contains hashes for dynamic chunks so they can be verified at load time
 						logger.info("Injecting SRI runtime into entry chunks");
-						const serializedMap = JSON.stringify(nonEntryHashes);
-						const cors = crossorigin ? JSON.stringify(crossorigin) : "false";
-						const serializedSkipPatterns = JSON.stringify(skipResources);
-						const runtimeCode = `\n(${installSriRuntime.toString()})(${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${enforceDynamicImports} });\n`;
+						const runtimeCode = buildSriRuntimeCode(
+							installSriRuntime,
+							nonEntryHashes,
+							{
+								crossorigin,
+								skipResources,
+								enforceDynamicImports,
+							}
+						);
 
 						for (const [fileName, bundleItem] of Object.entries(bundle)) {
 							if (bundleItem.type === "chunk" && bundleItem.isEntry) {
