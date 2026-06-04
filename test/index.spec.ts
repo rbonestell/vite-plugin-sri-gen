@@ -2158,6 +2158,35 @@ describe("vite-plugin-sri-gen", () => {
 			expect(entryCode).toContain("installSriRuntime");
 		});
 
+		it("passes the configured Vite base through to the injected runtime", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+				runtimePatchDynamicLinks: true,
+			}) as any;
+			plugin.configResolved?.({
+				base: "/app/",
+				build: { ssr: false },
+			} as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk(
+					"assets/lazy.js",
+					"src/lazy.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain('base: "/app/"');
+		});
+
 		it("does not rewrite import() or enable enforcement when preload injection is enabled (default)", async () => {
 			const plugin = sri({
 				algorithm: "sha256",
@@ -2448,6 +2477,33 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(code).toContain('skipResources: ["analytics-*"]');
 		expect(code).toContain("enforceDynamicImports: false");
 		expect(code).toContain('{"/a.js":"sha384-x"}');
+	});
+
+	it("serializes the base option into the injected runtime arguments", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/assets/lazy.js": "sha256-abc" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+				base: "/app/",
+			}
+		);
+		expect(code).toContain('base: "/app/"');
+	});
+
+	it("defaults the serialized base to '/' when not provided", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/a.js": "sha384-x" },
+			{
+				crossorigin: undefined,
+				skipResources: [],
+				enforceDynamicImports: false,
+			}
+		);
+		expect(code).toContain('base: "/"');
 	});
 
 	it("escapes `<` in serialized data so it cannot break out of the injected script", () => {

@@ -5584,6 +5584,39 @@ describe("Coverage Gap Closures", () => {
 			expect(fetched).toEqual(["https://app.test/app/assets/lazy.js"]);
 		});
 
+		it("__sriImport matches integrity by pathname when the specifier carries a query string", async () => {
+			// Lookup keys never include query strings; the URL pathname does
+			// the matching while fetch/import keep the full URL intact.
+			const content = "export const versioned = 1;";
+			const integrity = await expectedHash(content, "SHA-256");
+
+			const fetched: string[] = [];
+			(globalThis as any).fetch = vi.fn(async (u: any) => {
+				fetched.push(String(u));
+				return {
+					ok: true,
+					status: 200,
+					arrayBuffer: async () =>
+						new TextEncoder().encode(content).buffer,
+				};
+			});
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({ ok: true });
+
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/entry.js",
+					"./lazy.js?v=2"
+				)
+			).resolves.toEqual({ ok: true });
+			expect(fetched).toEqual(["https://app.test/assets/lazy.js?v=2"]);
+		});
+
 		it("__sriImport reports the resolved URL when no integrity is registered", async () => {
 			installSriRuntime({}, { enforceDynamicImports: true });
 			await expect(

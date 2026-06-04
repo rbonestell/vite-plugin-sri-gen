@@ -90,6 +90,11 @@ export function rewriteDynamicImports(code: string): string {
  * bundled, the serialized function is evaluated inside a wrapper that defines a
  * local `__name` shim in its lexical scope. `__name` only needs to return its
  * first argument; the function-name assignment it performs is cosmetic.
+ *
+ * `opts.base` is the resolved Vite `base` (defaults to "/"). It is forwarded
+ * to the runtime so integrity lookups can strip the base prefix from URLs
+ * observed at runtime — the integrity map keys are '/'-rooted bundle file
+ * names that never include the base.
  */
 export function buildSriRuntimeCode(
 	runtime: (

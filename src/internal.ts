@@ -2352,6 +2352,16 @@ export function installSriRuntime(
 			// resolving against `location.href` yields the wrong pathname
 			// for Rollup's module-relative inter-chunk specifiers like
 			// "./asset.js" (issue #32).
+			//
+			// Residual limitation: verification (`fetch`) and execution
+			// (native `import()`) are two separate requests for the same
+			// resolved URL. The HTTP cache normally makes them coherent, but
+			// a service worker (or a cache-busting intermediary) could in
+			// principle serve different bytes to each. Browsers do not
+			// expose integrity metadata on `import()`, so this TOCTOU window
+			// cannot be fully closed at the JS level — resolving both
+			// requests from one URL (this fix) is the strongest available
+			// guarantee.
 			const sriImport = async function (
 				importerUrl: string | undefined,
 				url: string
@@ -2381,11 +2391,14 @@ export function installSriRuntime(
 							(globalThis as any).location?.href ||
 							undefined
 					);
-				} catch {
+				} catch (e) {
+					// `cause` is ignored by engines that predate ES2022 Error
+					// options; the message alone still identifies the failure.
 					throw new Error(
 						"[vite-plugin-sri-gen] Cannot resolve dynamic import specifier " +
 							url +
-							(importerUrl ? " against " + importerUrl : "")
+							(importerUrl ? " against " + importerUrl : ""),
+						{ cause: e }
 					);
 				}
 				const expected = lookupIntegrityByPathname(resolved.pathname);
@@ -2604,6 +2617,7 @@ export function installSriRuntimeWithDeps(
 	opts?: {
 		crossorigin?: false | "anonymous" | "use-credentials";
 		skipResources?: string[];
+		base?: string;
 	},
 	dependencies: IRuntimeDependencies = defaultDependencies
 ) {
@@ -2667,6 +2681,38 @@ export function installSriRuntimeWithDeps(
 			return false;
 		};
 
+		// Pathname of the configured Vite `base` ("/" when unset) — mirrors
+		// the production `installSriRuntime` so base-stripped lookups behave
+		// identically in both variants.
+		let basePathname = "/";
+		try {
+			const rawBase = opts && (opts as any).base;
+			if (rawBase && typeof rawBase === "string") {
+				basePathname = new URL(rawBase, "http://x/").pathname;
+				if (!basePathname.endsWith("/")) basePathname += "/";
+			}
+		} catch {
+			// Unparseable base (e.g. relative "./") — keep "/" (no stripping)
+		}
+
+		/**
+		 * Looks up an integrity value by URL pathname, retrying with the
+		 * configured base prefix stripped (parity with installSriRuntime).
+		 */
+		const lookupIntegrityByPathname = (
+			pathname: string
+		): string | undefined => {
+			let value = map.get(pathname);
+			if (
+				value === undefined &&
+				basePathname !== "/" &&
+				pathname.indexOf(basePathname) === 0
+			) {
+				value = map.get("/" + pathname.slice(basePathname.length));
+			}
+			return value;
+		};
+
 		/**
 		 * Gets integrity value for a given URL using the URL adapter
 		 */
@@ -2678,7 +2724,7 @@ export function installSriRuntimeWithDeps(
 			try {
 				const resolvedURL = urlAdapter.resolveURL(url);
 				const u = new URL(resolvedURL);
-				return map.get(u.pathname);
+				return lookupIntegrityByPathname(u.pathname);
 			} catch {
 				// URL parsing failed - ignore and return undefined
 				return undefined;
