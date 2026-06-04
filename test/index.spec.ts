@@ -2110,9 +2110,12 @@ describe("vite-plugin-sri-gen", () => {
 			const out = rewriteDynamicImports(input);
 
 			expect(out).toContain("import x from 'a';");
-			expect(out).toContain("__sriImport('./lazy.js')");
-			expect(out).toContain("__sriImport( './lazy2.js' )");
-			expect(out).toContain("import.meta.url");
+			// The importer's module URL must be threaded through so the
+			// runtime can resolve relative specifiers the way native
+			// import() does (issue #32).
+			expect(out).toContain("__sriImport(import.meta.url, './lazy.js')");
+			expect(out).toContain("__sriImport(import.meta.url,  './lazy2.js' )");
+			expect(out).toContain("console.log(import.meta.url);");
 			expect(out).toContain("obj.import('./should-not-touch.js')");
 			// String literals are an accepted false-positive surface; ensure it
 			// at least does not corrupt the file structure.
@@ -2149,7 +2152,7 @@ describe("vite-plugin-sri-gen", () => {
 			await plugin.generateBundle.handler({}, bundle as any);
 
 			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
-			expect(entryCode).toContain("__sriImport('./lazy.js')");
+			expect(entryCode).toContain("__sriImport(import.meta.url, './lazy.js')");
 			expect(entryCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/lazy\.js/);
 			expect(entryCode).toContain("enforceDynamicImports: true");
 			expect(entryCode).toContain("installSriRuntime");
@@ -2230,7 +2233,7 @@ describe("vite-plugin-sri-gen", () => {
 			await plugin.generateBundle.handler({}, bundle as any);
 
 			const outerCode = (bundle["assets/outer.js"] as Chunk).code;
-			expect(outerCode).toContain("__sriImport('./inner.js')");
+			expect(outerCode).toContain("__sriImport(import.meta.url, './inner.js')");
 			expect(outerCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/inner\.js/);
 		});
 
@@ -2293,8 +2296,8 @@ describe("vite-plugin-sri-gen", () => {
 
 			const aCode = (bundle["assets/entry-a.js"] as Chunk).code;
 			const bCode = (bundle["assets/entry-b.js"] as Chunk).code;
-			expect(aCode).toContain("__sriImport('./shared.js')");
-			expect(bCode).toContain("__sriImport('./shared.js')");
+			expect(aCode).toContain("__sriImport(import.meta.url, './shared.js')");
+			expect(bCode).toContain("__sriImport(import.meta.url, './shared.js')");
 			expect(aCode).toContain("installSriRuntime");
 			expect(bCode).toContain("installSriRuntime");
 		});
