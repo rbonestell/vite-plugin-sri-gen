@@ -10,6 +10,7 @@ import { defaultDependencies } from "./dom-abstraction";
 type Document = DefaultTreeAdapterTypes.Document;
 type Element = DefaultTreeAdapterTypes.Element;
 type ChildNode = DefaultTreeAdapterTypes.ChildNode;
+type TextNode = DefaultTreeAdapterTypes.TextNode;
 
 // =======================================================
 // #region INTERFACES AND TYPES
@@ -103,6 +104,21 @@ export function isHttpUrl(url: unknown): boolean {
 }
 
 /**
+ * Escapes characters that could terminate the surrounding <script> context
+ * or break JS parsing when JSON is inlined into HTML or prepended to a
+ * chunk: `JSON.stringify` does not escape `<` or the U+2028/U+2029 line
+ * separators. The replacements are valid JSON escapes, so JSON.parse on the
+ * result is unaffected. Canonical copy \u2014 also used by buildSriRuntimeCode in
+ * index.ts.
+ */
+export function escapeForScript(json: string): string {
+	return json
+		.replace(/</g, "\\u003c")
+		.replace(/\u2028/g, "\\u2028")
+		.replace(/\u2029/g, "\\u2029");
+}
+
+/**
  * Normalizes bundle paths by removing protocol-relative and leading slash prefixes.
  * Vite bundle keys are typically relative paths, but sometimes contain leading slashes
  * or protocol-relative prefixes that need to be normalized.
@@ -153,6 +169,61 @@ export function joinBaseHref(base: string, chunkFile: string): string {
 		return normalizedBase + normalizedChunk;
 	}
 	return path.posix.join(base, chunkFile);
+}
+
+/**
+ * Whether the resolved Vite `base` can produce valid import map `integrity`
+ * keys. Import map keys must be URL-like — root-relative (`/...`),
+ * `./`/`../`-relative, or absolute URLs. The plugin only emits root-relative
+ * or absolute keys: a relative base (`./`, `../x/`, "") would require
+ * document-relative keys, which break for HTML pages in subdirectories
+ * (keys resolve against the DOCUMENT URL, not the deploy root).
+ */
+export function isImportMapCapableBase(base: string): boolean {
+	return base.startsWith("/") || isHttpUrl(base);
+}
+
+/**
+ * Builds the import map `integrity` object: emitted JS/MJS module URL → SRI
+ * metadata. Keys are joined with the configured Vite `base` exactly like
+ * injected modulepreload hrefs (see joinBaseHref), so they match the URLs the
+ * browser actually requests. Files matching a `skipResources` pattern are
+ * excluded — the user opted those out of SRI enforcement entirely. Returns
+ * null when `base` is relative (no valid keys can be produced — see
+ * isImportMapCapableBase).
+ */
+export function buildImportIntegrityObject(
+	sriByPathname: Record<string, string>,
+	base: string,
+	skipResources: string[] = []
+): Record<string, string> | null {
+	if (!isImportMapCapableBase(base)) return null;
+	const result: Record<string, string> = {};
+	for (const [pathname, integrity] of Object.entries(sriByPathname)) {
+		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
+		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
+		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+		if (isSkippedResource(fileName, skipResources)) continue;
+		result[joinBaseHref(base, fileName)] = integrity;
+	}
+	return result;
+}
+
+/**
+ * Whether a bundle file matches any `skipResources` pattern. Patterns are
+ * tested against both the bare file name and its '/'-rooted form so patterns
+ * written either way match (same contract as manifest augmentation).
+ */
+export function isSkippedResource(
+	file: string,
+	skipResources: string[]
+): boolean {
+	if (!skipResources || skipResources.length === 0) return false;
+	for (const pattern of skipResources) {
+		if (matchesPattern(pattern, file)) return true;
+		if (matchesPattern(pattern, `/${file}`)) return true;
+	}
+	return false;
 }
 
 /**
@@ -535,6 +606,39 @@ function findElements(
 function getAttrValue(element: Element, name: string): string | undefined {
 	const attr = element.attrs.find((a: Token.Attribute) => a.name === name);
 	return attr?.value;
+}
+
+/**
+ * Index in head.childNodes at which plugin-injected elements (import map,
+ * modulepreload links) should be inserted. The HTML spec wants the charset
+ * declaration within the first 1024 bytes of the document, and the injected
+ * content grows with chunk count — so insertion goes AFTER a
+ * charset-declaring <meta>, provided it appears before any script or link
+ * element (the import map must precede those). Falls back to the start of
+ * head otherwise.
+ */
+function headInjectionIndex(head: Element): number {
+	if (!head.childNodes) return 0;
+	for (let i = 0; i < head.childNodes.length; i++) {
+		const node = head.childNodes[i];
+		if (!("tagName" in node)) continue; // text/comment nodes
+		const el = node as Element;
+		const tag = el.tagName?.toLowerCase();
+		if (tag === "meta") {
+			const httpEquiv = getAttrValue(el, "http-equiv")?.toLowerCase();
+			if (
+				getAttrValue(el, "charset") !== undefined ||
+				httpEquiv === "content-type"
+			) {
+				return i + 1;
+			}
+			continue;
+		}
+		// A script or link already precedes any charset meta — injected
+		// content must come before it, so insert at the head start.
+		if (tag === "script" || tag === "link") return 0;
+	}
+	return 0;
 }
 
 /**
@@ -1561,10 +1665,22 @@ export class HtmlProcessor {
 		}
 
 		// ========================================================================
+		// IMPORT MAP INTEGRITY INJECTION
+		// ========================================================================
+
+		// Step 3: Inject import map integrity (runs after preload injection so
+		// the unshift places the map BEFORE the modulepreload links).
+		processedHtml = this.injectImportMap(
+			processedHtml,
+			sriByPathname,
+			fileName
+		);
+
+		// ========================================================================
 		// BUNDLE UPDATE
 		// ========================================================================
 
-		// Step 3: Update asset source with processed HTML
+		// Step 4: Update asset source with processed HTML
 		asset.source = processedHtml;
 	}
 
@@ -1793,13 +1909,179 @@ export class HtmlProcessor {
 			});
 		}
 
-		// Add the link element to the beginning of head
+		// Insert at the head start, but after a leading charset meta — the
+		// charset declaration must stay within the first 1024 bytes and the
+		// number of injected links grows with chunk count.
 		if (!head.childNodes) {
 			head.childNodes = [];
 		}
-		head.childNodes.unshift(linkElement);
+		head.childNodes.splice(headInjectionIndex(head), 0, linkElement);
 
 		return true;
+	}
+
+	/**
+	 * Injects (or merges into) a `<script type="importmap">` carrying an
+	 * `integrity` object for every emitted JS module chunk. Browsers
+	 * supporting import map integrity (Chrome 127+, Firefox 138+,
+	 * Safari 18+) then enforce SRI natively on static AND dynamic module
+	 * imports — single fetch, no TOCTOU. Older browsers ignore the
+	 * `integrity` key (progressive enhancement, same model as SRI attributes
+	 * generally).
+	 *
+	 * Must run AFTER addDynamicChunkPreloads: both insert at the same
+	 * computed head position (see headInjectionIndex), so running last places
+	 * the import map ahead of the injected links — the spec requires it
+	 * before any module script or modulepreload link.
+	 *
+	 * No-ops (returning the input unchanged) when: base is relative (the
+	 * resulting keys — bare or document-relative — cannot be used portably
+	 * across pages in subdirectories), no JS chunks exist, <head> is missing,
+	 * or an existing import map contains unparseable JSON (warned).
+	 */
+	private injectImportMap(
+		htmlContent: string,
+		sriByPathname: Record<string, string>,
+		fileName: string
+	): string {
+		const integrityObject = buildImportIntegrityObject(
+			sriByPathname,
+			this.config.base,
+			this.config.skipResources
+		);
+		// Relative base — no valid keys can be produced. The build-level log
+		// in generateBundle reports this once instead of once per HTML file.
+		if (integrityObject === null) {
+			return htmlContent;
+		}
+		if (Object.keys(integrityObject).length === 0) {
+			return htmlContent;
+		}
+
+		try {
+			const document = parse(htmlContent, {
+				sourceCodeLocationInfo: false,
+			});
+			const head = findElements(
+				document,
+				(el) => el.nodeName?.toLowerCase() === "head"
+			)[0];
+			if (!head) {
+				this.config.logger.warn(
+					`No <head> element found in ${fileName}, skipping import map injection`
+				);
+				return htmlContent;
+			}
+
+			// An absolute-URL <base href> changes the document base URL the
+			// browser resolves import map keys against — root-relative keys
+			// like "/assets/x.js" would resolve against the <base> origin and
+			// may never match the URLs modules are actually served from.
+			// Build-time is the only place this is detectable; warn.
+			const baseEl = findElements(head, (el) => {
+				return (
+					el.nodeName?.toLowerCase() === "base" &&
+					isHttpUrl(getAttrValue(el, "href"))
+				);
+			});
+			if (baseEl.length > 0) {
+				this.config.logger.warn(
+					`${fileName} contains <base href="${getAttrValue(baseEl[0], "href")}">; import map integrity keys resolve against the document base URL and may not match the served module URLs`
+				);
+			}
+
+			const existingMaps = findElements(head, (el) => {
+				if (el.nodeName?.toLowerCase() !== "script") return false;
+				return getAttrValue(el, "type")?.toLowerCase() === "importmap";
+			});
+
+			if (existingMaps.length > 0) {
+				// Browsers process multiple import maps inconsistently across
+				// versions — merge into the first map instead of adding
+				// another.
+				const existingEl = existingMaps[0];
+				const textChild = existingEl.childNodes.find(
+					(n): n is TextNode => n.nodeName === "#text"
+				);
+				let parsed: {
+					integrity?: Record<string, string>;
+					[k: string]: unknown;
+				};
+				try {
+					parsed = JSON.parse(textChild?.value ?? "{}");
+				} catch {
+					this.config.logger.warn(
+						`Existing <script type="importmap"> in ${fileName} contains invalid JSON; integrity entries not merged`
+					);
+					return htmlContent;
+				}
+				// User-authored integrity entries win on key collision — but a
+				// divergence between a user-pinned hash and the build-computed
+				// hash is almost always a mistake (stale template, or a
+				// tampered build input), so surface it loudly.
+				const userIntegrity = parsed.integrity ?? {};
+				for (const [key, value] of Object.entries(userIntegrity)) {
+					if (
+						key in integrityObject &&
+						integrityObject[key] !== value
+					) {
+						this.config.logger.warn(
+							`Existing import map in ${fileName} pins integrity for ${key} (${String(value)}) that differs from the build-computed hash (${integrityObject[key]}); keeping the existing entry`
+						);
+					}
+				}
+				parsed.integrity = {
+					...integrityObject,
+					...userIntegrity,
+				};
+				const json = escapeForScript(JSON.stringify(parsed));
+				if (textChild) {
+					textChild.value = json;
+				} else {
+					existingEl.childNodes.push({
+						nodeName: "#text",
+						value: json,
+						parentNode: existingEl,
+					} as TextNode);
+				}
+			} else {
+				const json = escapeForScript(
+					JSON.stringify({ integrity: integrityObject })
+				);
+				const textNode = {
+					nodeName: "#text",
+					value: json,
+					parentNode: null,
+				} as unknown as TextNode;
+				const importMapEl: Element = {
+					nodeName: "script",
+					tagName: "script",
+					attrs: [{ name: "type", value: "importmap" }],
+					namespaceURI: "http://www.w3.org/1999/xhtml" as any,
+					childNodes: [textNode],
+					parentNode: head,
+					sourceCodeLocation: undefined,
+				};
+				(textNode as any).parentNode = importMapEl;
+				if (!head.childNodes) head.childNodes = [];
+				// Same insertion point the preload links use: after a leading
+				// charset meta (which must stay within the first 1024 bytes —
+				// the map grows with chunk count), otherwise the head start.
+				// Inserting at the same index AFTER the preload pass places
+				// the map before every injected link.
+				head.childNodes.splice(headInjectionIndex(head), 0, importMapEl);
+			}
+
+			return serialize(document);
+		} catch (error) {
+			this.config.logger.error(
+				`Failed to inject import map into ${fileName}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				error instanceof Error ? error : undefined
+			);
+			return htmlContent;
+		}
 	}
 }
 
@@ -2052,13 +2334,7 @@ export class ManifestProcessor {
 	}
 
 	private isSkipped(file: string, skipResources: string[]): boolean {
-		if (!skipResources || skipResources.length === 0) return false;
-		for (const pattern of skipResources) {
-			if (matchesPattern(pattern, file)) return true;
-			// Also allow patterns written with a leading slash to match
-			if (matchesPattern(pattern, `/${file}`)) return true;
-		}
-		return false;
+		return isSkippedResource(file, skipResources);
 	}
 }
 

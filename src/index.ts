@@ -4,10 +4,12 @@ import type { BundleLogger } from "./internal";
 import {
 	createLogger,
 	DynamicImportAnalyzer,
+	escapeForScript,
 	handleGenerateBundleError,
 	HtmlProcessor,
 	installSriRuntime,
 	IntegrityProcessor,
+	isImportMapCapableBase,
 	ManifestProcessor,
 	validateGenerateBundleInputs,
 } from "./internal";
@@ -109,17 +111,11 @@ export function buildSriRuntimeCode(
 		base?: string;
 	}
 ): string {
-	// `JSON.stringify` does not escape `<` or the U+2028/U+2029 line separators.
-	// The serialized data is embedded as a JS string literal inside code that is
-	// prepended to a chunk, so escape those characters to keep the injected
-	// statement well-formed (and safe if a chunk is ever inlined into HTML).
-	// This only changes the source representation; the parsed runtime values are
-	// identical.
-	const escapeForScript = (json: string): string =>
-		json
-			.replace(/</g, "\\u003c")
-			.replace(/\u2028/g, "\\u2028")
-			.replace(/\u2029/g, "\\u2029");
+	// The serialized data is embedded as a JS string literal inside code that
+	// is prepended to a chunk; escapeForScript (shared with the import map
+	// injection) keeps the injected statement well-formed and safe if a chunk
+	// is ever inlined into HTML. This only changes the source representation;
+	// the parsed runtime values are identical.
 	const serializedMap = escapeForScript(JSON.stringify(sriByPathname));
 	const cors = opts.crossorigin ? JSON.stringify(opts.crossorigin) : "false";
 	const serializedSkipPatterns = escapeForScript(
@@ -250,6 +246,14 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					if (!hasHtmlFiles && !hasManifestFiles) {
 						return;
 					}
+					// Logged once per build (not per HTML file): with a
+					// relative base, import map integrity keys cannot be
+					// expressed portably, so HTML processing skips injection.
+					if (hasHtmlFiles && !isImportMapCapableBase(base)) {
+						logger.info(
+							`Import map SRI skipped: relative base "${base}" cannot produce valid import map keys`
+						);
+					}
 
 					const integrityProcessor = new IntegrityProcessor(
 						algorithm,
@@ -268,12 +272,24 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// any hashing so the served bytes match the hashed bytes.
 						// Activation condition: the user has disabled the
 						// build-time modulepreload injection (preloadDynamicChunks
-						// is false), which means browser-native SRI on
-						// modulepreload cannot be relied upon to protect lazy
-						// chunks. In that case we substitute the global SRI
-						// verifier injected by the runtime so every dynamic
-						// import goes through a strict, in-JS integrity check.
-						const enforceDynamicImports = !preloadDynamicChunks;
+						// is false) AND the import map cannot cover every consumer
+						// of this bundle. JS-level enforcement is the fallback
+						// for builds where the import map is insufficient: no
+						// HTML in the bundle (backend-owned HTML / manifest
+						// consumers), a manifest emitted ALONGSIDE HTML (the
+						// manifest consumer's server-rendered pages have no
+						// import map, so suppressing the rewrite would silently
+						// drop their enforcement), or a relative base (no valid
+						// import map keys). Wherever the import map covers all
+						// consumers it subsumes this path — the browser enforces
+						// SRI natively on module fetches (single fetch, no
+						// rewrite, source maps kept).
+						const importMapCapable =
+							hasHtmlFiles &&
+							!hasManifestFiles &&
+							isImportMapCapableBase(base);
+						const enforceDynamicImports =
+							!preloadDynamicChunks && !importMapCapable;
 						if (enforceDynamicImports) {
 							// ORDERING INVARIANT: this rewrite MUST run before
 							// any hashing AND before the runtime is injected
