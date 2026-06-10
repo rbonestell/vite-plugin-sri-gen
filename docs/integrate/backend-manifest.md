@@ -102,7 +102,7 @@ function renderPage(entryKey) {
 
 `dynamicImports` (lazy chunks) can be resolved the same way — look up each value as a key in the manifest and read its `integrity`. For deeply nested dependency trees, walk `imports` recursively, tracking visited keys to avoid cycles.
 
-::: tip
+::: tip Existing values are preserved
 Existing `integrity` or `cssIntegrity` values on manifest entries are preserved and never overwritten. If you pre-populate these fields in a custom build step, the plugin leaves them alone.
 :::
 
