@@ -9,6 +9,7 @@ export default withMermaid(
 		base: "/vite-plugin-sri-gen/",
 		appearance: "dark",
 		cleanUrls: true,
+		srcExclude: ["superpowers/**"],
 		lastUpdated: true,
 		head: [
 			["link", { rel: "icon", type: "image/svg+xml", href: "/vite-plugin-sri-gen/bolt.svg" }],

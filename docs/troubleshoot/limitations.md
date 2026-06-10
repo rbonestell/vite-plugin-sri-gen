@@ -8,7 +8,7 @@ Most Vite apps are fully covered with the default configuration, but a few scena
 
 **Why:** SRI attributes live in HTML tags. The plugin operates in the `generateBundle` hook, which runs on emitted files. Request-time HTML rendered by your server is not an emitted file; it doesn't exist at build time.
 
-**Workaround:** Use the manifest integration path. The plugin augments `manifest.json` with integrity hashes for every chunk. Your server reads the manifest and injects the correct `integrity` attribute when it renders the `<script>` and `<link>` tags for each response. See [Backend Manifest](/integrate/backend-manifest) and [SSR and SSG](/integrate/ssr-ssg).
+**Workaround:** Use the manifest integration path. The plugin augments `manifest.json` with integrity hashes for every chunk. Your server reads the manifest and injects the correct `integrity` attribute when it renders the `<script>` and `<link>` tags for each response. See [Backend-Owned HTML (Manifest)](/integrate/backend-manifest) and [SSR, SSG & Prerendering](/integrate/ssr-ssg).
 
 ## Web Workers & Service Workers
 

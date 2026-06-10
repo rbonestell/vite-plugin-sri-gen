@@ -24,4 +24,4 @@ Adding `integrity` to only the top-level entry script while the rest of the modu
 
 Build outputs are content-addressed and stable: Vite hashes filenames by content, assets don't change after the build, and the complete module graph is known. That's the environment where SRI gives you real protection — every hash is accurate, every module is covered, and browsers can reliably validate each fetch.
 
-Run `vite build` to produce integrity-annotated output. See [How It Works](/learn/how-it-works) for a walkthrough of what the plugin does at build time.
+Run `vite build` to produce integrity-annotated output. See [How the Plugin Works](/learn/how-it-works) for a walkthrough of what the plugin does at build time.
