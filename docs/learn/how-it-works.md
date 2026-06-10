@@ -1,3 +1,7 @@
+---
+description: "Inside the plugin's generateBundle pipeline: scanning emitted HTML, computing hashes, and injecting integrity attributes after Rollup builds the bundle."
+---
+
 # How the Plugin Works
 
 ## The Build Pipeline
@@ -7,6 +11,7 @@ The plugin registers as a `post`-order `generateBundle` hook — a single Rollup
 Within `generateBundle`, processing runs in four ordered steps:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, ui-sans-serif, system-ui, sans-serif","primaryColor":"#1b1733","primaryTextColor":"#e2e0f0","primaryBorderColor":"#7c3aed","lineColor":"#8b5cf6","textColor":"#b8b4d8","edgeLabelBackground":"#0e0c1d"}}}%%
 flowchart TD
     A([Vite build starts]) --> B[Rollup assembles bundle]
     B --> C{runtimePatchDynamicLinks?}
@@ -24,6 +29,11 @@ flowchart TD
     L -- yes --> M[Augment manifest\nwith integrity fields]
     L -- no --> N([Build complete])
     M --> N
+
+    classDef terminal fill:#16132a,stroke:#2dd4bf,color:#ccfbf1
+    classDef decision fill:#16132a,stroke:#fbbf24,color:#fef3c7
+    class A,N terminal
+    class C,J,L decision
 ```
 
 **Step 1 — Integrity mappings.** Every `.js`, `.mjs`, and `.css` file in the bundle is hashed using Node's `crypto.createHash`. When `runtimePatchDynamicLinks` is enabled (the default), this runs in two passes: non-entry chunks are hashed first, then the runtime is injected into entry chunks, then entry chunks are hashed — so the entry chunk hash covers the injected runtime code.

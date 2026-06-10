@@ -1,29 +1,156 @@
 import { defineConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
 
+const SITE_URL = "https://rbonestell.com/vite-plugin-sri-gen/";
+const SITE_TITLE = "vite-plugin-sri-gen";
+const SITE_DESCRIPTION =
+	"Autogenerate Subresource Integrity (SRI) hashes for your Vite build at build time.";
+const GITHUB_URL = "https://github.com/rbonestell/vite-plugin-sri-gen";
+
+const AUTHOR = {
+	"@type": "Person",
+	name: "Bobby Bonestell",
+	url: "https://rbonestell.com",
+};
+
 export default withMermaid(
 	defineConfig({
-		title: "vite-plugin-sri-gen",
-		description:
-			"Autogenerate Subresource Integrity (SRI) hashes for your Vite build at build time.",
+		title: SITE_TITLE,
+		description: SITE_DESCRIPTION,
 		base: "/vite-plugin-sri-gen/",
 		appearance: "dark",
 		cleanUrls: true,
 		srcExclude: ["superpowers/**"],
 		lastUpdated: true,
+		sitemap: {
+			// VitePress joins hostname + page path without the base, so include it here
+			hostname: SITE_URL,
+		},
+		transformPageData(pageData) {
+			// Per-page canonical + Open Graph tags (og:title/og:description/og:url)
+			const pagePath = pageData.relativePath
+				.replace(/(^|\/)index\.md$/, "$1")
+				.replace(/\.md$/, "");
+			const url = SITE_URL + pagePath;
+			const title =
+				pageData.title && pageData.title !== SITE_TITLE
+					? `${pageData.title} | ${SITE_TITLE}`
+					: SITE_TITLE;
+			pageData.frontmatter.head ??= [];
+			pageData.frontmatter.head.push(
+				["link", { rel: "canonical", href: url }],
+				["meta", { property: "og:url", content: url }],
+				["meta", { property: "og:title", content: title }],
+				[
+					"meta",
+					{
+						property: "og:description",
+						content: pageData.description || SITE_DESCRIPTION,
+					},
+				],
+			);
+
+			// JSON-LD structured data: WebSite + SoftwareApplication on the
+			// homepage, TechArticle on every docs page.
+			const isHome = pageData.relativePath === "index.md";
+			const schemas = isHome
+				? [
+						{
+							"@context": "https://schema.org",
+							"@type": "WebSite",
+							name: SITE_TITLE,
+							url: SITE_URL,
+							description: SITE_DESCRIPTION,
+						},
+						{
+							"@context": "https://schema.org",
+							"@type": "SoftwareApplication",
+							name: SITE_TITLE,
+							description: SITE_DESCRIPTION,
+							url: SITE_URL,
+							image: `${SITE_URL}og.png`,
+							applicationCategory: "DeveloperApplication",
+							operatingSystem: "Node.js >=18",
+							offers: {
+								"@type": "Offer",
+								price: "0",
+								priceCurrency: "USD",
+							},
+							license: `${GITHUB_URL}/blob/main/LICENSE`,
+							author: AUTHOR,
+							sameAs: [
+								GITHUB_URL,
+								"https://www.npmjs.com/package/vite-plugin-sri-gen",
+							],
+						},
+					]
+				: [
+						{
+							"@context": "https://schema.org",
+							"@type": "TechArticle",
+							headline: pageData.title,
+							description:
+								pageData.description || SITE_DESCRIPTION,
+							url,
+							image: `${SITE_URL}og.png`,
+							author: AUTHOR,
+							isPartOf: {
+								"@type": "WebSite",
+								name: SITE_TITLE,
+								url: SITE_URL,
+							},
+							...(pageData.lastUpdated
+								? {
+										dateModified: new Date(
+											pageData.lastUpdated,
+										).toISOString(),
+									}
+								: {}),
+						},
+					];
+			for (const schema of schemas) {
+				pageData.frontmatter.head.push([
+					"script",
+					{ type: "application/ld+json" },
+					JSON.stringify(schema),
+				]);
+			}
+		},
 		head: [
-			["link", { rel: "icon", type: "image/svg+xml", href: "/vite-plugin-sri-gen/bolt.svg" }],
+			[
+				"link",
+				{
+					rel: "icon",
+					type: "image/png",
+					href: "/vite-plugin-sri-gen/icon.png",
+				},
+			],
+			["meta", { property: "og:type", content: "website" }],
+			["meta", { property: "og:site_name", content: SITE_TITLE }],
+			["meta", { property: "og:locale", content: "en_US" }],
+			["meta", { property: "og:image", content: `${SITE_URL}og.png` }],
+			["meta", { property: "og:image:width", content: "1280" }],
+			["meta", { property: "og:image:height", content: "640" }],
+			[
+				"meta",
+				{
+					property: "og:image:alt",
+					content: "vite-plugin-sri-gen — SRI hashes at build time",
+				},
+			],
+			["meta", { name: "twitter:card", content: "summary_large_image" }],
+			["meta", { name: "twitter:image", content: `${SITE_URL}og.png` }],
 			[
 				"script",
 				{
-					"data-goatcounter": "https://vite-plugin-sri-gen.goatcounter.com/count",
+					"data-goatcounter":
+						"https://vite-plugin-sri-gen.goatcounter.com/count",
 					async: "",
 					src: "//gc.zgo.at/count.js",
 				},
 			],
 		],
 		themeConfig: {
-			logo: "/bolt.svg",
 			nav: [
 				{ text: "Getting Started", link: "/getting-started" },
 				{ text: "Learn", link: "/learn/what-is-sri" },
@@ -36,16 +163,28 @@ export default withMermaid(
 				{
 					text: "Learn",
 					items: [
-						{ text: "What is Subresource Integrity?", link: "/learn/what-is-sri" },
-						{ text: "How the Plugin Works", link: "/learn/how-it-works" },
-						{ text: "Coverage Strategies", link: "/learn/coverage-strategies" },
+						{
+							text: "What is Subresource Integrity?",
+							link: "/learn/what-is-sri",
+						},
+						{
+							text: "How the Plugin Works",
+							link: "/learn/how-it-works",
+						},
+						{
+							text: "Coverage Strategies",
+							link: "/learn/coverage-strategies",
+						},
 					],
 				},
 				{
 					text: "Configure",
 					items: [
 						{ text: "Options", link: "/configure/options" },
-						{ text: "Skipping Resources", link: "/configure/skipping-resources" },
+						{
+							text: "Skipping Resources",
+							link: "/configure/skipping-resources",
+						},
 						{ text: "Networking", link: "/configure/networking" },
 					],
 				},
@@ -53,16 +192,31 @@ export default withMermaid(
 					text: "Integrate",
 					items: [
 						{ text: "SPA & MPA", link: "/integrate/spa-mpa" },
-						{ text: "SSR, SSG & Prerendering", link: "/integrate/ssr-ssg" },
-						{ text: "Backend-Owned HTML (Manifest)", link: "/integrate/backend-manifest" },
-						{ text: "Import Map Integrity", link: "/integrate/import-map" },
-						{ text: "Runtime Patching", link: "/integrate/runtime-patching" },
+						{
+							text: "SSR, SSG & Prerendering",
+							link: "/integrate/ssr-ssg",
+						},
+						{
+							text: "Backend-Owned HTML (Manifest)",
+							link: "/integrate/backend-manifest",
+						},
+						{
+							text: "Import Map Integrity",
+							link: "/integrate/import-map",
+						},
+						{
+							text: "Runtime Patching",
+							link: "/integrate/runtime-patching",
+						},
 					],
 				},
 				{
 					text: "Troubleshoot",
 					items: [
-						{ text: "Limitations", link: "/troubleshoot/limitations" },
+						{
+							text: "Limitations",
+							link: "/troubleshoot/limitations",
+						},
 						{ text: "Dev Mode", link: "/troubleshoot/dev-mode" },
 						{ text: "FAQ", link: "/troubleshoot/faq" },
 					],
@@ -75,8 +229,14 @@ export default withMermaid(
 				text: "Suggest changes to this page",
 			},
 			socialLinks: [
-				{ icon: "github", link: "https://github.com/rbonestell/vite-plugin-sri-gen" },
-				{ icon: "npm", link: "https://www.npmjs.com/package/vite-plugin-sri-gen" },
+				{
+					icon: "github",
+					link: "https://github.com/rbonestell/vite-plugin-sri-gen",
+				},
+				{
+					icon: "npm",
+					link: "https://www.npmjs.com/package/vite-plugin-sri-gen",
+				},
 			],
 			footer: {
 				message: "Released under the MIT License.",
@@ -94,5 +254,5 @@ export default withMermaid(
 				tertiaryColor: "#0e0c1d",
 			},
 		},
-	})
+	}),
 );

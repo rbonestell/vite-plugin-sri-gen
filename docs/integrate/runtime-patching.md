@@ -1,3 +1,7 @@
+---
+description: "A CSP-safe runtime patches DOM methods so dynamically created script and link tags receive integrity attributes before the browser fetches them."
+---
+
 # Runtime Patching
 
 With `runtimePatchDynamicLinks` enabled (the default), the plugin prepends a small runtime to every entry chunk. The runtime patches DOM mutation methods so that `<script>` and `<link>` elements created dynamically at runtime receive `integrity` (and `crossorigin`, if configured) before the browser makes the request.

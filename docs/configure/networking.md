@@ -1,3 +1,7 @@
+---
+description: "When the plugin fetches remote assets at build time, and how to tune fetchCache and fetchTimeoutMs for fast, reliable builds."
+---
+
 # Networking
 
 The plugin touches the network only for **remote assets** — resources with an `http://`, `https://`, or protocol-relative `//` URL in your HTML. Protocol-relative URLs are treated as `https`. All locally-built assets (JS chunks, CSS, anything Vite emits into the bundle) are read directly from the in-memory bundle; no network request is made for them.

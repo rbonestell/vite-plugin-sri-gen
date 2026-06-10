@@ -1,3 +1,7 @@
+---
+description: "Why SRI is intentionally disabled during vite dev — HMR bypasses integrity by design — and when SRI protection actually matters."
+---
+
 # Dev Mode
 
 SRI is intentionally disabled during `vite dev`. The plugin does nothing during development — no integrity attributes, no import map injection, no runtime patching. This is by design, not a bug.

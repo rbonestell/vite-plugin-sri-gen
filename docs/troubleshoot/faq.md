@@ -1,3 +1,7 @@
+---
+description: "Answers to common questions: missing integrity attributes, CSP and import map conflicts, double-downloading chunks, ESM-only packaging, and more."
+---
+
 # FAQ
 
 ## Why is there no `integrity` on some of my tags?

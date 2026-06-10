@@ -1,3 +1,7 @@
+---
+description: "Zero-config SRI for single-page and multi-page Vite apps — every emitted HTML file gets integrity attributes at build time."
+---
+
 # SPA & MPA
 
 ## Single-Page Apps

@@ -1,3 +1,7 @@
+---
+description: "Install vite-plugin-sri-gen, add it to your Vite config, and get SRI integrity attributes on every script and stylesheet in your next build."
+---
+
 # Getting Started
 
 ## Install

@@ -94,6 +94,14 @@
 	--vp-local-nav-bg-color: #0e0c1d;
 }
 
+/* ─── Navbar title: same gradient as the hero name ───────────────────────── */
+.VPNavBarTitle .title > span {
+	background: var(--vp-home-hero-name-background);
+	background-clip: text;
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+}
+
 /* ─── Hero name: electric weight + tightened tracking ─────────────────────── */
 .VPHero .name {
 	font-weight: 800;
@@ -131,6 +139,18 @@
 	border-radius: 4px;
 	padding: 2px 6px;
 	font-weight: 500;
+}
+
+/* ─── Mermaid diagrams: navy card so the Voltage palette reads in both modes ─ */
+.mermaid {
+	display: flex;
+	justify-content: center;
+	margin: 16px 0;
+	padding: 24px;
+	background: #0e0c1d;
+	border: 1px solid rgba(124, 58, 237, 0.25);
+	border-radius: 12px;
+	overflow-x: auto;
 }
 
 /* ─── Content links: violet underline ────────────────────────────────────── */

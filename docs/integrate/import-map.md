@@ -1,3 +1,7 @@
+---
+description: "How the injected import map declares per-module integrity so dynamically imported chunks are verified, plus browser support and CSP considerations."
+---
+
 # Import Map Integrity
 
 When the build emits HTML and `base` is root-relative (`/`) or an absolute URL, the plugin injects a `<script type="importmap">` into each HTML file. The map declares an `integrity` object keyed by module URL, covering every emitted JS module:

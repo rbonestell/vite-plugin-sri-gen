@@ -1,3 +1,7 @@
+---
+description: "What the plugin can't cover at build time — pure SSR, web workers, older browsers — why each limit exists, and the recommended workarounds."
+---
+
 # Limitations
 
 Most Vite apps are fully covered with the default configuration, but a few scenarios fall outside what the plugin can address at build time. The sections below describe each limitation, why it exists, and what to do about it.

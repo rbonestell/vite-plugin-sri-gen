@@ -1,3 +1,7 @@
+---
+description: "How Subresource Integrity pins scripts and styles to exact content hashes, the CDN-tampering attack it prevents, and why automation is necessary."
+---
+
 # What is Subresource Integrity?
 
 Subresource Integrity (SRI) is a browser security feature that lets you pin the exact content a `<script>` or `<link>` tag is allowed to load. You do this by adding an `integrity` attribute containing a cryptographic hash of the expected file bytes. If the fetched bytes don't match, the browser refuses to execute or apply the resource.
@@ -31,6 +35,7 @@ The `integrity` attribute contains an algorithm prefix and a base64-encoded hash
 When the browser fetches `lib.js`, it hashes the received bytes with the specified algorithm and compares against the declared value. The check fails closed: if the hashes don't match — or if the `integrity` attribute is present but the browser can't verify (e.g., a CORS error) — the resource is blocked and a network error is surfaced to the page.
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, ui-sans-serif, system-ui, sans-serif","primaryColor":"#1b1733","primaryTextColor":"#e2e0f0","primaryBorderColor":"#7c3aed","lineColor":"#8b5cf6","textColor":"#b8b4d8","actorLineColor":"#8b87b0","signalColor":"#8b5cf6","signalTextColor":"#b8b4d8","noteBkgColor":"#fbbf24","noteTextColor":"#1b1733","noteBorderColor":"#d97706","labelBoxBkgColor":"#16132a","labelBoxBorderColor":"#7c3aed","labelTextColor":"#e2e0f0","loopTextColor":"#a78bfa"}}}%%
 sequenceDiagram
     participant B as Browser
     participant C as CDN / Server

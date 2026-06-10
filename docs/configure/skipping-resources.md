@@ -1,3 +1,7 @@
+---
+description: "Use skipResources patterns to exclude third-party analytics, A/B testing scripts, and mutable CDN assets from SRI processing."
+---
+
 # Skipping Resources
 
 Some resources should not have integrity attributes. Third-party analytics scripts are updated by the vendor without notice. A/B testing tools serve intentionally varying content. CDN assets delivered from a provider's infrastructure may be rewritten by edge workers or personalization layers before they reach the browser. Adding an integrity hash to these resources would break your page every time the bytes change.

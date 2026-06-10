@@ -1,3 +1,7 @@
+---
+description: "The plugin augments Vite's manifest with integrity and cssIntegrity fields so backend-rendered HTML can attach SRI hashes without re-hashing files."
+---
+
 # Backend-Owned HTML (Manifest)
 
 When your backend owns HTML generation — a Node server, a Django template, a Go handler, or anything else that reads the Vite manifest to decide which assets to load — enable `build.manifest: true` in your Vite config. The plugin automatically augments the emitted manifest with `integrity` and `cssIntegrity` fields so your server can attach them to the tags it renders without re-hashing the files.

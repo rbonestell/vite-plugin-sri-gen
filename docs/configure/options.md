@@ -1,3 +1,7 @@
+---
+description: "Complete reference for every vite-plugin-sri-gen option with types, defaults, and examples — algorithm, crossorigin, fetchCache, skipResources, and more."
+---
+
 # Options
 
 ## Type Reference

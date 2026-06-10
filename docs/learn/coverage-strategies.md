@@ -1,3 +1,7 @@
+---
+description: "How static tag injection, import map integrity, runtime patching, and manifest augmentation layer together to cover every way a Vite app loads code."
+---
+
 # Coverage Strategies
 
 A Vite app loads code through several different mechanisms, and SRI enforcement must be wired up separately for each one. The plugin provides multiple strategies that layer on top of each other, with sensible defaults covering the common case and opt-in controls for the rest.
@@ -79,6 +83,7 @@ Builds that are fully covered by the import map have none of these constraints. 
 ## Which Mechanism Applies When
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, ui-sans-serif, system-ui, sans-serif","primaryColor":"#1b1733","primaryTextColor":"#e2e0f0","primaryBorderColor":"#7c3aed","lineColor":"#8b5cf6","textColor":"#b8b4d8","edgeLabelBackground":"#0e0c1d"}}}%%
 flowchart TD
     A([Build complete]) --> B{HTML emitted\nin bundle?}
     B -- no --> C[Manifest augmentation only\nno HTML-side mechanisms]
@@ -93,6 +98,11 @@ flowchart TD
     E --> L{runtimePatchDynamicLinks?}
     L -- true\ndefault --> M[JS import rewrite active]
     L -- false --> N[Dynamic imports unverified\non older browsers]
+
+    classDef terminal fill:#16132a,stroke:#2dd4bf,color:#ccfbf1
+    classDef decision fill:#16132a,stroke:#fbbf24,color:#fef3c7
+    class A terminal
+    class B,D,G,I,L decision
 ```
 
 ## Comparison

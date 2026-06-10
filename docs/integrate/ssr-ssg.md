@@ -1,3 +1,7 @@
+---
+description: "Why pure SSR output can't receive build-time hashes, and how SSG, prerendering, and manifest-driven backends still get full SRI coverage."
+---
+
 # SSR, SSG & Prerendering
 
 ## Why Pure SSR Can't Be Modified
