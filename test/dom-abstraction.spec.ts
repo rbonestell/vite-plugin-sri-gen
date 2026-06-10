@@ -442,6 +442,48 @@ describe("Runtime Installation with Dependency Injection", () => {
 		expect(script.getAttribute("crossorigin")).toBe("anonymous");
 	});
 
+	it("strips the configured base prefix when looking up integrity for DOM elements", () => {
+		// Map keys are '/'-rooted bundle file names WITHOUT the Vite base;
+		// element URLs observed at runtime include it under sub-path
+		// deployments. The lookup must strip the base before retrying.
+		const sriMap = { "/assets/main.js": "sha256-based" };
+
+		const mockElement = { prototype: { setAttribute: () => {} } };
+		const mockNode = {
+			prototype: { appendChild: () => {}, insertBefore: () => {} },
+		};
+		const originalElement = (globalThis as any).Element;
+		const originalNode = (globalThis as any).Node;
+
+		try {
+			(globalThis as any).Element = mockElement;
+			(globalThis as any).Node = mockNode;
+
+			installSriRuntimeWithDeps(
+				sriMap,
+				{ crossorigin: "anonymous", base: "/app/" },
+				dependencies
+			);
+
+			// The callback handed to wrapSetAttribute is the runtime's
+			// element processor; drive it directly with a script whose
+			// resolved URL includes the base prefix.
+			const processElement =
+				dependencies.mocks.nodeAdapter.wrapSetAttribute.mock
+					.calls[0][1];
+			const script = mockElements.createScript({
+				src: "/app/assets/main.js",
+			});
+			processElement(script);
+
+			expect(script.getAttribute("integrity")).toBe("sha256-based");
+			expect(script.getAttribute("crossorigin")).toBe("anonymous");
+		} finally {
+			(globalThis as any).Element = originalElement;
+			(globalThis as any).Node = originalNode;
+		}
+	});
+
 	it("handles errors gracefully", () => {
 		const sriMap = { "/test.js": "sha256-abc123" };
 

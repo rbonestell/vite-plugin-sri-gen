@@ -5222,6 +5222,7 @@ describe("Coverage Gap Closures", () => {
 			installSriRuntime({}, { enforceDynamicImports: true });
 			await expect(
 				(globalThis as any).__sriImport(
+					undefined,
 					"https://app.test/assets/unknown.js"
 				)
 			).rejects.toThrow(/no integrity registered/i);
@@ -5250,6 +5251,7 @@ describe("Coverage Gap Closures", () => {
 			};
 
 			const result = await (globalThis as any).__sriImport(
+				undefined,
 				"https://app.test/assets/lazy.js"
 			);
 			expect(result).toEqual({ ok: true });
@@ -5276,6 +5278,7 @@ describe("Coverage Gap Closures", () => {
 
 			await expect(
 				(globalThis as any).__sriImport(
+					undefined,
 					"https://app.test/assets/lazy.js"
 				)
 			).rejects.toThrow(/integrity verification failed/i);
@@ -5297,6 +5300,7 @@ describe("Coverage Gap Closures", () => {
 
 			await expect(
 				(globalThis as any).__sriImport(
+					undefined,
 					"https://app.test/assets/lazy.js"
 				)
 			).rejects.toThrow(/HTTP 503/);
@@ -5309,6 +5313,7 @@ describe("Coverage Gap Closures", () => {
 			);
 			await expect(
 				(globalThis as any).__sriImport(
+					undefined,
 					"https://app.test/assets/lazy.js"
 				)
 			).rejects.toThrow(/unsupported integrity algorithm/i);
@@ -5336,6 +5341,7 @@ describe("Coverage Gap Closures", () => {
 				Promise.resolve({});
 
 			await (globalThis as any).__sriImport(
+				undefined,
 				"https://app.test/assets/lazy.js"
 			);
 
@@ -5367,6 +5373,7 @@ describe("Coverage Gap Closures", () => {
 				Promise.resolve({});
 
 			await (globalThis as any).__sriImport(
+				undefined,
 				"https://app.test/assets/lazy.js"
 			);
 
@@ -5395,6 +5402,7 @@ describe("Coverage Gap Closures", () => {
 				Promise.resolve({});
 
 			await (globalThis as any).__sriImport(
+				undefined,
 				"https://app.test/assets/lazy.js"
 			);
 
@@ -5468,6 +5476,7 @@ describe("Coverage Gap Closures", () => {
 				vi.stubGlobal("crypto", { subtle: undefined });
 				await expect(
 					(globalThis as any).__sriImport(
+						undefined,
 						"https://app.test/assets/lazy.js"
 					)
 				).rejects.toThrow(
@@ -5476,6 +5485,148 @@ describe("Coverage Gap Closures", () => {
 			} finally {
 				vi.stubGlobal("crypto", origCrypto);
 			}
+		});
+
+		it("__sriImport resolves module-relative specifiers against the importing module's URL", async () => {
+			// A chunk at /assets/js/parent.js imports './asset.js'. Native
+			// import() resolves that against the importing module's URL, so
+			// the runtime must do the same — NOT against location.href.
+			const content = "export const nested = true;";
+			const integrity = await expectedHash(content, "SHA-256");
+
+			const fetched: string[] = [];
+			(globalThis as any).fetch = vi.fn(async (u: any) => {
+				fetched.push(String(u));
+				return {
+					ok: true,
+					status: 200,
+					arrayBuffer: async () =>
+						new TextEncoder().encode(content).buffer,
+				};
+			});
+
+			installSriRuntime(
+				{ "/assets/js/asset.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+
+			const nativeCalls: string[] = [];
+			(globalThis as any).__sriNativeImport = (u: string) => {
+				nativeCalls.push(u);
+				return Promise.resolve({ ok: true });
+			};
+
+			const result = await (globalThis as any).__sriImport(
+				"https://app.test/assets/js/parent.js",
+				"./asset.js"
+			);
+			expect(result).toEqual({ ok: true });
+			// Fetch and native import must both use the SAME resolved URL so
+			// the verified bytes are the executed bytes.
+			expect(fetched).toEqual(["https://app.test/assets/js/asset.js"]);
+			expect(nativeCalls).toEqual([
+				"https://app.test/assets/js/asset.js",
+			]);
+		});
+
+		it("__sriImport falls back to location.href when no importer URL is provided", async () => {
+			const content = "export const v = 2;";
+			const integrity = await expectedHash(content, "SHA-256");
+			(globalThis as any).fetch = vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				arrayBuffer: async () =>
+					new TextEncoder().encode(content).buffer,
+			}));
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({ ok: true });
+
+			await expect(
+				(globalThis as any).__sriImport(undefined, "/assets/lazy.js")
+			).resolves.toEqual({ ok: true });
+		});
+
+		it("__sriImport strips the configured base prefix when looking up integrity", async () => {
+			// Map keys are '/'-rooted bundle file names without the Vite base;
+			// resolved URLs under a sub-path deployment include it.
+			const content = "export const based = 1;";
+			const integrity = await expectedHash(content, "SHA-256");
+
+			const fetched: string[] = [];
+			(globalThis as any).fetch = vi.fn(async (u: any) => {
+				fetched.push(String(u));
+				return {
+					ok: true,
+					status: 200,
+					arrayBuffer: async () =>
+						new TextEncoder().encode(content).buffer,
+				};
+			});
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true, base: "/app/" }
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({ ok: true });
+
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/app/assets/entry.js",
+					"./lazy.js"
+				)
+			).resolves.toEqual({ ok: true });
+			expect(fetched).toEqual(["https://app.test/app/assets/lazy.js"]);
+		});
+
+		it("__sriImport matches integrity by pathname when the specifier carries a query string", async () => {
+			// Lookup keys never include query strings; the URL pathname does
+			// the matching while fetch/import keep the full URL intact.
+			const content = "export const versioned = 1;";
+			const integrity = await expectedHash(content, "SHA-256");
+
+			const fetched: string[] = [];
+			(globalThis as any).fetch = vi.fn(async (u: any) => {
+				fetched.push(String(u));
+				return {
+					ok: true,
+					status: 200,
+					arrayBuffer: async () =>
+						new TextEncoder().encode(content).buffer,
+				};
+			});
+
+			installSriRuntime(
+				{ "/assets/lazy.js": integrity },
+				{ enforceDynamicImports: true }
+			);
+			(globalThis as any).__sriNativeImport = () =>
+				Promise.resolve({ ok: true });
+
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/entry.js",
+					"./lazy.js?v=2"
+				)
+			).resolves.toEqual({ ok: true });
+			expect(fetched).toEqual(["https://app.test/assets/lazy.js?v=2"]);
+		});
+
+		it("__sriImport reports the resolved URL when no integrity is registered", async () => {
+			installSriRuntime({}, { enforceDynamicImports: true });
+			await expect(
+				(globalThis as any).__sriImport(
+					"https://app.test/assets/js/parent.js",
+					"./asset.js"
+				)
+			).rejects.toThrow(
+				/no integrity registered for \.\/asset\.js \(resolved to https:\/\/app\.test\/assets\/js\/asset\.js\)/i
+			);
 		});
 	});
 });

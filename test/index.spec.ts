@@ -2110,9 +2110,12 @@ describe("vite-plugin-sri-gen", () => {
 			const out = rewriteDynamicImports(input);
 
 			expect(out).toContain("import x from 'a';");
-			expect(out).toContain("__sriImport('./lazy.js')");
-			expect(out).toContain("__sriImport( './lazy2.js' )");
-			expect(out).toContain("import.meta.url");
+			// The importer's module URL must be threaded through so the
+			// runtime can resolve relative specifiers the way native
+			// import() does (issue #32).
+			expect(out).toContain("__sriImport(import.meta.url, './lazy.js')");
+			expect(out).toContain("__sriImport(import.meta.url,  './lazy2.js' )");
+			expect(out).toContain("console.log(import.meta.url);");
 			expect(out).toContain("obj.import('./should-not-touch.js')");
 			// String literals are an accepted false-positive surface; ensure it
 			// at least does not corrupt the file structure.
@@ -2149,10 +2152,39 @@ describe("vite-plugin-sri-gen", () => {
 			await plugin.generateBundle.handler({}, bundle as any);
 
 			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
-			expect(entryCode).toContain("__sriImport('./lazy.js')");
+			expect(entryCode).toContain("__sriImport(import.meta.url, './lazy.js')");
 			expect(entryCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/lazy\.js/);
 			expect(entryCode).toContain("enforceDynamicImports: true");
 			expect(entryCode).toContain("installSriRuntime");
+		});
+
+		it("passes the configured Vite base through to the injected runtime", async () => {
+			const plugin = sri({
+				algorithm: "sha256",
+				preloadDynamicChunks: false,
+				runtimePatchDynamicLinks: true,
+			}) as any;
+			plugin.configResolved?.({
+				base: "/app/",
+				build: { ssr: false },
+			} as any);
+
+			const bundle: Record<string, Chunk | Asset> = {
+				"index.html": { type: "asset", source: htmlDoc("") },
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk(
+					"assets/lazy.js",
+					"src/lazy.ts"
+				),
+			} as any;
+
+			await plugin.generateBundle.handler({}, bundle as any);
+
+			const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+			expect(entryCode).toContain('base: "/app/"');
 		});
 
 		it("does not rewrite import() or enable enforcement when preload injection is enabled (default)", async () => {
@@ -2230,7 +2262,7 @@ describe("vite-plugin-sri-gen", () => {
 			await plugin.generateBundle.handler({}, bundle as any);
 
 			const outerCode = (bundle["assets/outer.js"] as Chunk).code;
-			expect(outerCode).toContain("__sriImport('./inner.js')");
+			expect(outerCode).toContain("__sriImport(import.meta.url, './inner.js')");
 			expect(outerCode).not.toMatch(/[^.\w$]import\s*\(\s*['"]\.\/inner\.js/);
 		});
 
@@ -2293,8 +2325,8 @@ describe("vite-plugin-sri-gen", () => {
 
 			const aCode = (bundle["assets/entry-a.js"] as Chunk).code;
 			const bCode = (bundle["assets/entry-b.js"] as Chunk).code;
-			expect(aCode).toContain("__sriImport('./shared.js')");
-			expect(bCode).toContain("__sriImport('./shared.js')");
+			expect(aCode).toContain("__sriImport(import.meta.url, './shared.js')");
+			expect(bCode).toContain("__sriImport(import.meta.url, './shared.js')");
 			expect(aCode).toContain("installSriRuntime");
 			expect(bCode).toContain("installSriRuntime");
 		});
@@ -2445,6 +2477,33 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(code).toContain('skipResources: ["analytics-*"]');
 		expect(code).toContain("enforceDynamicImports: false");
 		expect(code).toContain('{"/a.js":"sha384-x"}');
+	});
+
+	it("serializes the base option into the injected runtime arguments", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/assets/lazy.js": "sha256-abc" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+				base: "/app/",
+			}
+		);
+		expect(code).toContain('base: "/app/"');
+	});
+
+	it("defaults the serialized base to '/' when not provided", () => {
+		const code = buildSriRuntimeCode(
+			installSriRuntime,
+			{ "/a.js": "sha384-x" },
+			{
+				crossorigin: undefined,
+				skipResources: [],
+				enforceDynamicImports: false,
+			}
+		);
+		expect(code).toContain('base: "/"');
 	});
 
 	it("escapes `<` in serialized data so it cannot break out of the injected script", () => {

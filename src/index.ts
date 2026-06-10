@@ -51,15 +51,24 @@ const DYNAMIC_IMPORT_CALL_RE = /(?<![.\w$])import\s*\(/g;
 
 /**
  * Rewrites every dynamic `import(...)` call expression in a chunk to
- * `__sriImport(...)` so the runtime-injected JS-level verifier can enforce
- * integrity before executing the module. The original `import(` syntax inside
- * the runtime itself is preserved because the runtime is concatenated AFTER
- * this rewrite step.
+ * `__sriImport(import.meta.url, ...)` so the runtime-injected JS-level
+ * verifier can enforce integrity before executing the module. The original
+ * `import(` syntax inside the runtime itself is preserved because the runtime
+ * is concatenated AFTER this rewrite step.
+ *
+ * `import.meta.url` is threaded through as the first argument because native
+ * `import()` resolves relative specifiers against the IMPORTING MODULE's URL,
+ * not the document URL. Rollup emits inter-chunk dynamic imports as
+ * module-relative specifiers (e.g. `import('./asset.js')` from a chunk in
+ * `assets/js/`), so without the importer's URL the runtime would resolve the
+ * specifier against `location.href` and look up the wrong pathname
+ * (issue #32). The injected `import.meta.url` text is never re-matched by the
+ * rewrite regex: `import` there is followed by `.`, not `(`.
  */
 export function rewriteDynamicImports(code: string): string {
 	if (!code || typeof code !== "string") return code;
 	if (code.indexOf("import") === -1) return code;
-	return code.replace(DYNAMIC_IMPORT_CALL_RE, "__sriImport(");
+	return code.replace(DYNAMIC_IMPORT_CALL_RE, "__sriImport(import.meta.url, ");
 }
 
 /**
@@ -81,6 +90,11 @@ export function rewriteDynamicImports(code: string): string {
  * bundled, the serialized function is evaluated inside a wrapper that defines a
  * local `__name` shim in its lexical scope. `__name` only needs to return its
  * first argument; the function-name assignment it performs is cosmetic.
+ *
+ * `opts.base` is the resolved Vite `base` (defaults to "/"). It is forwarded
+ * to the runtime so integrity lookups can strip the base prefix from URLs
+ * observed at runtime — the integrity map keys are '/'-rooted bundle file
+ * names that never include the base.
  */
 export function buildSriRuntimeCode(
 	runtime: (
@@ -92,6 +106,7 @@ export function buildSriRuntimeCode(
 		crossorigin: "anonymous" | "use-credentials" | undefined;
 		skipResources: string[];
 		enforceDynamicImports: boolean;
+		base?: string;
 	}
 ): string {
 	// `JSON.stringify` does not escape `<` or the U+2028/U+2029 line separators.
@@ -110,7 +125,8 @@ export function buildSriRuntimeCode(
 	const serializedSkipPatterns = escapeForScript(
 		JSON.stringify(opts.skipResources)
 	);
-	const args = `${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${opts.enforceDynamicImports} }`;
+	const serializedBase = escapeForScript(JSON.stringify(opts.base ?? "/"));
+	const args = `${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${opts.enforceDynamicImports}, base: ${serializedBase} }`;
 	// Self-containment shim — see the doc comment above for why this is needed.
 	const shim = "var __name=function(fn){return fn;};";
 	return `\n(function(){${shim}return (${runtime.toString()});})()(${args});\n`;
@@ -312,6 +328,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 								crossorigin,
 								skipResources,
 								enforceDynamicImports,
+								base,
 							}
 						);
 
