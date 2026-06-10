@@ -33,6 +33,7 @@
 	--vp-button-brand-hover-bg: #8b5cf6;
 	--vp-button-brand-hover-border: #7c3aed;
 	--vp-button-brand-active-bg: #6d28d9;
+	--vp-button-brand-active-text: #ffffff;
 }
 
 /**
@@ -44,10 +45,8 @@
 	--vp-c-bg-alt: #16132a;
 	--vp-c-bg-soft: #16132a;
 	--vp-c-bg-elv: #1b1733;
-	--vp-c-bg-mute: #1b1733;
 
-	--vp-c-divider: rgba(167, 139, 250, 0.16);
-	--vp-c-divider-light: rgba(167, 139, 250, 0.08);
+	--vp-c-divider: rgba(124, 58, 237, 0.25);
 
 	--vp-c-brand-1: #a78bfa;
 	--vp-c-brand-2: #8b5cf6;
@@ -97,6 +96,7 @@
 	--vp-button-brand-hover-bg: #8b5cf6;
 	--vp-button-brand-hover-border: #7c3aed;
 	--vp-button-brand-active-bg: #6d28d9;
+	--vp-button-brand-active-text: #ffffff;
 
 	/* Nav / sidebar surface */
 	--vp-nav-bg-color: rgba(14, 12, 29, 0.9);
@@ -116,20 +116,14 @@
 	letter-spacing: 0.025em;
 }
 
-/* ─── Hero image: violet glow pulse ──────────────────────────────────────── */
-.VPHero .image-container {
-	position: relative;
-}
-
 /* ─── Feature cards: gradient border glow on hover ───────────────────────── */
 .VPFeature {
-	transition: border-color 0.28s ease, box-shadow 0.28s ease, transform 0.28s ease;
-	border: 1px solid transparent;
-	background-clip: padding-box;
+	transition: box-shadow 0.28s ease, transform 0.28s ease;
 }
 
-.VPFeature:hover {
-	border-color: #a855f7;
+.VPFeatures .VPFeature:hover {
+	/* Override the brand variable so scoped styles pick up the violet border */
+	--vp-c-brand-1: #a855f7;
 	box-shadow:
 		0 0 0 1px rgba(168, 85, 247, 0.3),
 		0 0 28px rgba(168, 85, 247, 0.22),
@@ -142,21 +136,11 @@
 	filter: drop-shadow(0 0 6px rgba(45, 212, 191, 0.5));
 }
 
-/* ─── Navbar: slight violet border bottom ────────────────────────────────── */
-.dark .VPNav {
-	border-bottom-color: rgba(124, 58, 237, 0.25);
-}
-
 /* ─── Code blocks: subtle amber glow on inline code in dark mode ─────────── */
 .dark code:not(pre code) {
 	border-radius: 4px;
 	padding: 2px 6px;
 	font-weight: 500;
-}
-
-/* ─── Sidebar: active link amber accent ──────────────────────────────────── */
-.dark .VPSidebarItem.is-active > .item > .link > .text {
-	color: #a78bfa;
 }
 
 /* ─── Content links: violet underline ────────────────────────────────────── */
