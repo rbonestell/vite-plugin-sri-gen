@@ -196,6 +196,31 @@ describe("Internal Utility Functions", () => {
 			).toEqual({});
 		});
 
+		it("excludes entries matching skipResources patterns", () => {
+			expect(
+				buildImportIntegrityObject(map, "/", ["**/chunk-B.mjs"])
+			).toEqual({
+				"/assets/entry.js": "sha384-AAA",
+			});
+			// Patterns written with a leading slash also match
+			expect(
+				buildImportIntegrityObject(map, "/", ["/assets/entry.js"])
+			).toEqual({
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("includes JS pathnames carrying a query suffix (PROCESSABLE_EXTENSIONS parity)", () => {
+			expect(
+				buildImportIntegrityObject(
+					{ "/assets/entry.js?v=1": "sha384-QQQ" },
+					"/"
+				)
+			).toEqual({
+				"/assets/entry.js?v=1": "sha384-QQQ",
+			});
+		});
+
 		it("strips leading slash from chunk file with absolute URL base", () => {
 			expect(
 				joinBaseHref("https://cdn.myapp.com/", "/assets/chunk.js")

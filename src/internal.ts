@@ -105,11 +105,13 @@ export function isHttpUrl(url: unknown): boolean {
 
 /**
  * Escapes characters that could terminate the surrounding <script> context
- * or break JS parsing when JSON is inlined into HTML. The replacements are
- * valid JSON escapes, so JSON.parse on the result is unaffected. Mirrors
- * `escapeForScript` in index.ts (kept local to avoid a module cycle).
+ * or break JS parsing when JSON is inlined into HTML or prepended to a
+ * chunk: `JSON.stringify` does not escape `<` or the U+2028/U+2029 line
+ * separators. The replacements are valid JSON escapes, so JSON.parse on the
+ * result is unaffected. Canonical copy \u2014 also used by buildSriRuntimeCode in
+ * index.ts.
  */
-function escapeForScriptInternal(json: string): string {
+export function escapeForScript(json: string): string {
 	return json
 		.replace(/</g, "\\u003c")
 		.replace(/\u2028/g, "\\u2028")
@@ -185,21 +187,43 @@ export function isImportMapCapableBase(base: string): boolean {
  * Builds the import map `integrity` object: emitted JS/MJS module URL → SRI
  * metadata. Keys are joined with the configured Vite `base` exactly like
  * injected modulepreload hrefs (see joinBaseHref), so they match the URLs the
- * browser actually requests. Returns null when `base` is relative (no valid
- * keys can be produced — see isImportMapCapableBase).
+ * browser actually requests. Files matching a `skipResources` pattern are
+ * excluded — the user opted those out of SRI enforcement entirely. Returns
+ * null when `base` is relative (no valid keys can be produced — see
+ * isImportMapCapableBase).
  */
 export function buildImportIntegrityObject(
 	sriByPathname: Record<string, string>,
-	base: string
+	base: string,
+	skipResources: string[] = []
 ): Record<string, string> | null {
 	if (!isImportMapCapableBase(base)) return null;
 	const result: Record<string, string> = {};
 	for (const [pathname, integrity] of Object.entries(sriByPathname)) {
-		if (!/\.m?js$/i.test(pathname)) continue;
+		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
+		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+		if (isSkippedResource(fileName, skipResources)) continue;
 		result[joinBaseHref(base, fileName)] = integrity;
 	}
 	return result;
+}
+
+/**
+ * Whether a bundle file matches any `skipResources` pattern. Patterns are
+ * tested against both the bare file name and its '/'-rooted form so patterns
+ * written either way match (same contract as manifest augmentation).
+ */
+export function isSkippedResource(
+	file: string,
+	skipResources: string[]
+): boolean {
+	if (!skipResources || skipResources.length === 0) return false;
+	for (const pattern of skipResources) {
+		if (matchesPattern(pattern, file)) return true;
+		if (matchesPattern(pattern, `/${file}`)) return true;
+	}
+	return false;
 }
 
 /**
@@ -1865,7 +1889,7 @@ export class HtmlProcessor {
 	 * Injects (or merges into) a `<script type="importmap">` carrying an
 	 * `integrity` object for every emitted JS module chunk. Browsers
 	 * supporting import map integrity (Chrome 127+, Firefox 138+,
-	 * Safari 18.4+) then enforce SRI natively on static AND dynamic module
+	 * Safari 18+) then enforce SRI natively on static AND dynamic module
 	 * imports — single fetch, no TOCTOU. Older browsers ignore the
 	 * `integrity` key (progressive enhancement, same model as SRI attributes
 	 * generally).
@@ -1874,9 +1898,10 @@ export class HtmlProcessor {
 	 * head.childNodes.unshift, so running last places the import map FIRST —
 	 * the spec requires it before any module script or modulepreload link.
 	 *
-	 * No-ops (returning the input unchanged) when: base is relative (keys
-	 * would be bare specifiers), no JS chunks exist, <head> is missing, or an
-	 * existing import map contains unparseable JSON (warned).
+	 * No-ops (returning the input unchanged) when: base is relative (the
+	 * resulting keys — bare or document-relative — cannot be used portably
+	 * across pages in subdirectories), no JS chunks exist, <head> is missing,
+	 * or an existing import map contains unparseable JSON (warned).
 	 */
 	private injectImportMap(
 		htmlContent: string,
@@ -1885,12 +1910,12 @@ export class HtmlProcessor {
 	): string {
 		const integrityObject = buildImportIntegrityObject(
 			sriByPathname,
-			this.config.base
+			this.config.base,
+			this.config.skipResources
 		);
+		// Relative base — no valid keys can be produced. The build-level log
+		// in generateBundle reports this once instead of once per HTML file.
 		if (integrityObject === null) {
-			this.config.logger.info(
-				`Import map SRI skipped for ${fileName}: relative base "${this.config.base}" cannot produce valid import map keys`
-			);
 			return htmlContent;
 		}
 		if (Object.keys(integrityObject).length === 0) {
@@ -1898,7 +1923,9 @@ export class HtmlProcessor {
 		}
 
 		try {
-			const document = parse(htmlContent);
+			const document = parse(htmlContent, {
+				sourceCodeLocationInfo: false,
+			});
 			const head = findElements(
 				document,
 				(el) => el.nodeName?.toLowerCase() === "head"
@@ -1908,6 +1935,23 @@ export class HtmlProcessor {
 					`No <head> element found in ${fileName}, skipping import map injection`
 				);
 				return htmlContent;
+			}
+
+			// An absolute-URL <base href> changes the document base URL the
+			// browser resolves import map keys against — root-relative keys
+			// like "/assets/x.js" would resolve against the <base> origin and
+			// may never match the URLs modules are actually served from.
+			// Build-time is the only place this is detectable; warn.
+			const baseEl = findElements(head, (el) => {
+				return (
+					el.nodeName?.toLowerCase() === "base" &&
+					isHttpUrl(getAttrValue(el, "href"))
+				);
+			});
+			if (baseEl.length > 0) {
+				this.config.logger.warn(
+					`${fileName} contains <base href="${getAttrValue(baseEl[0], "href")}">; import map integrity keys resolve against the document base URL and may not match the served module URLs`
+				);
 			}
 
 			const existingMaps = findElements(head, (el) => {
@@ -1935,12 +1979,26 @@ export class HtmlProcessor {
 					);
 					return htmlContent;
 				}
-				// User-authored integrity entries win on key collision.
+				// User-authored integrity entries win on key collision — but a
+				// divergence between a user-pinned hash and the build-computed
+				// hash is almost always a mistake (stale template, or a
+				// tampered build input), so surface it loudly.
+				const userIntegrity = parsed.integrity ?? {};
+				for (const [key, value] of Object.entries(userIntegrity)) {
+					if (
+						key in integrityObject &&
+						integrityObject[key] !== value
+					) {
+						this.config.logger.warn(
+							`Existing import map in ${fileName} pins integrity for ${key} (${String(value)}) that differs from the build-computed hash (${integrityObject[key]}); keeping the existing entry`
+						);
+					}
+				}
 				parsed.integrity = {
 					...integrityObject,
-					...(parsed.integrity ?? {}),
+					...userIntegrity,
 				};
-				const json = escapeForScriptInternal(JSON.stringify(parsed));
+				const json = escapeForScript(JSON.stringify(parsed));
 				if (textChild) {
 					textChild.value = json;
 				} else {
@@ -1951,7 +2009,7 @@ export class HtmlProcessor {
 					} as TextNode);
 				}
 			} else {
-				const json = escapeForScriptInternal(
+				const json = escapeForScript(
 					JSON.stringify({ integrity: integrityObject })
 				);
 				const textNode = {
@@ -2235,13 +2293,7 @@ export class ManifestProcessor {
 	}
 
 	private isSkipped(file: string, skipResources: string[]): boolean {
-		if (!skipResources || skipResources.length === 0) return false;
-		for (const pattern of skipResources) {
-			if (matchesPattern(pattern, file)) return true;
-			// Also allow patterns written with a leading slash to match
-			if (matchesPattern(pattern, `/${file}`)) return true;
-		}
-		return false;
+		return isSkippedResource(file, skipResources);
 	}
 }
 

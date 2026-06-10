@@ -2663,4 +2663,152 @@ describe("import map SRI", () => {
 			mappings: "AAAA",
 		});
 	});
+
+	it("excludes skipResources-matched chunks from the import map integrity object", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: true,
+			skipResources: ["**/vendor.js"],
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: htmlDoc("") },
+			"assets/entry.js": makeEntryChunk({ code: "" }),
+			"assets/vendor.js": makeDynChunk("assets/vendor.js", "src/vendor.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		const parsed = JSON.parse(m![1]);
+		expect(parsed.integrity["/assets/entry.js"]).toMatch(/^sha256-/);
+		expect(parsed.integrity["/assets/vendor.js"]).toBeUndefined();
+	});
+
+	it("injects integrity into an existing import map element that has no text content", async () => {
+		const existing = '<script type="importmap"></script>';
+		const { plugin, bundle } = buildPluginBundle(
+			"/",
+			`<!doctype html><html><head>${existing}</head><body></body></html>`
+		);
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const maps = html.match(/<script type="importmap">/g) ?? [];
+		expect(maps.length).toBe(1);
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		const parsed = JSON.parse(m![1]);
+		expect(parsed.integrity["/assets/entry.js"]).toMatch(/^sha256-/);
+		expect(parsed.integrity["/assets/lazy.js"]).toMatch(/^sha256-/);
+	});
+
+	it("uses absolute CDN URLs as import map keys when base is an absolute URL", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: true,
+		}) as any;
+		plugin.configResolved?.({
+			base: "https://cdn.example.com/",
+			build: { ssr: false },
+		} as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: htmlDoc("") },
+			"assets/entry.js": makeEntryChunk({ code: "" }),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		expect(m).toBeTruthy();
+		const parsed = JSON.parse(m![1]);
+		expect(
+			parsed.integrity["https://cdn.example.com/assets/entry.js"]
+		).toMatch(/^sha256-/);
+		expect(
+			parsed.integrity["https://cdn.example.com/assets/lazy.js"]
+		).toMatch(/^sha256-/);
+		expect(parsed.integrity["/assets/entry.js"]).toBeUndefined();
+	});
+
+	it("injects the import map even when runtimePatchDynamicLinks is false", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: htmlDoc("") },
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		expect(m).toBeTruthy();
+		const parsed = JSON.parse(m![1]);
+		expect(parsed.integrity["/assets/entry.js"]).toMatch(/^sha256-/);
+		expect(
+			(bundle["assets/entry.js"] as Chunk).code
+		).not.toContain("installSriRuntime");
+	});
+
+	it("keeps the JS enforcement rewrite when a manifest is emitted alongside HTML (mixed-bundle consumers)", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: true,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: htmlDoc("") },
+			".vite/manifest.json": {
+				type: "asset",
+				source: JSON.stringify({
+					"src/main.ts": { file: "assets/entry.js" },
+				}),
+			},
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		// Manifest consumers render their own HTML without the import map, so
+		// the JS-level enforcement path must remain active for them.
+		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+		expect(entryCode).toContain("__sriImport(import.meta.url, './lazy.js')");
+		expect(entryCode).toContain("enforceDynamicImports: true");
+		// The emitted HTML still gets the import map (covers its own pages).
+		const html = String((bundle["index.html"] as Asset).source);
+		expect(html).toContain('<script type="importmap">');
+	});
+
+	it("warns when an existing import map pins an integrity value that differs from the computed hash", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const existing =
+				'<script type="importmap">{"integrity":{"/assets/entry.js":"sha256-USER"}}</script>';
+			const { plugin, bundle } = buildPluginBundle(
+				"/",
+				`<!doctype html><html><head>${existing}</head><body></body></html>`
+			);
+			await plugin.generateBundle.handler({}, bundle as any);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"differs from the build-computed hash"
+				)
+			);
+			// The user's entry is still kept (documented precedence).
+			const html = String((bundle["index.html"] as Asset).source);
+			const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+			const parsed = JSON.parse(m![1]);
+			expect(parsed.integrity["/assets/entry.js"]).toBe("sha256-USER");
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
 });
