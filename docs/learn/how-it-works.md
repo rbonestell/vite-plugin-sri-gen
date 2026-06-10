@@ -4,10 +4,6 @@
 
 The plugin registers as a `post`-order `generateBundle` hook — a single Rollup hook that fires after the full bundle has been assembled and all output files are determined. There is no `transformIndexHtml` hook; both SPA and MPA HTML files are handled the same way, by scanning the in-memory bundle for `.html` assets.
 
-::: info Source verification
-The plugin exposes exactly one plugin hook: `generateBundle` (see `src/index.ts`). The README's reference to `transformIndexHtml` handling the SPA case reflects intent, not implementation — the source uses `generateBundle` exclusively, which works for all HTML types.
-:::
-
 Within `generateBundle`, processing runs in five ordered steps:
 
 ```mermaid
