@@ -16,41 +16,20 @@
 
 # vite-plugin-sri-gen
 
-- Adds integrity attribute to script tags, stylesheet links, and modulepreload links in index.html
-- Works out of the box in production builds
-- Optionally injects rel="modulepreload" with integrity for lazy-loaded chunks
-- Optionally injects a tiny CSP-safe runtime that adds integrity/crossorigin to dynamically inserted \<script\>/\<link\>
-- Augments Vite's build manifest with SRI hashes so backends that own HTML generation can attach `integrity` without re-hashing
-- Build-only by design (no dev server SRI)
-- Supports SPA, MPA, and prerendered SSR/SSG HTML (logs a warning when a pure SSR server emits no HTML)
-- Fast and network-friendly: in-memory HTTP cache with in-flight dedupe; optional fetch timeouts
-- ESM-only, Node 18+ (uses global fetch)
+Add [Subresource Integrity (SRI)](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hashes to your Vite build automatically.
 
-> [!IMPORTANT]  
-> Unfortunately, this plugin cannot directly modify HTML for most [SSR (server-side rendering)](https://vuejs.org/guide/scaling-up/ssr.html) projects, including but not limited to those using Svelte.
-> This plugin works by hooking into the Vite and Rollup events at build time to calculate integrity hashes and apply them to the HTML elements. Because SSR projects typically do not generate markup at build time, the HTML-injection step is effectively a no-op when implemented in most SSR projects.
->
-> Two scenarios still benefit:
->
-> - **Pre-rendering** — SSR projects that explicitly build, bundle, and output prerendered HTML during the build (for example via [vite-plugin-ssr](https://vite-plugin-ssr.com/pre-rendering)) have their HTML augmented normally.
-> - **Backend-owned HTML** — if your SSR runtime (or any backend) reads the Vite manifest to decide which assets to load, enable `build.manifest: true` and see [Vite Manifest Integration](#vite-manifest-integration). The plugin will emit `integrity` values in the manifest so your server can attach them to the tags it renders.
+- Adds `integrity` to scripts, stylesheets, and modulepreload links in emitted HTML — plus import map integrity, modulepreload injection for lazy chunks, a CSP-safe runtime for dynamic tags, and Vite manifest augmentation for backend-rendered HTML
+- Build-only by design — works out of the box for SPA, MPA, and prerendered SSG output
+- ESM-only, Node 18+, Vite 4+
 
-## Table of Contents
+## Documentation
 
-- [Install](#install)
-- [Quick Start](#quick-start)
-- [Dev Mode](#dev-mode)
-- [Configuration](#configuration)
-- [Skipping Resources](#skipping-resources)
-- [Lazy-loaded Chunks and Dynamic Tags](#lazy-loaded-chunks-and-dynamic-tags)
-- [Import Map Integrity](#import-map-integrity)
-- [Runtime Patching](#runtime-patching)
-- [Vite Manifest Integration](#vite-manifest-integration)
-- [Compatibility](#compatibility)
-- [Examples](#examples)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
+**[📚 Full documentation →](https://rbonestell.com/vite-plugin-sri-gen/)**
+
+- [Getting Started](https://rbonestell.com/vite-plugin-sri-gen/getting-started)
+- [Configuration Options](https://rbonestell.com/vite-plugin-sri-gen/configure/options)
+- [What is SRI?](https://rbonestell.com/vite-plugin-sri-gen/learn/what-is-sri)
+- [Troubleshooting & Limitations](https://rbonestell.com/vite-plugin-sri-gen/troubleshoot/limitations)
 
 ## Install
 
@@ -60,286 +39,32 @@ npm i -D vite-plugin-sri-gen
 
 ## Quick start
 
-vite.config.ts / vite.config.js:
-
 ```ts
+// vite.config.ts
 import sri from "vite-plugin-sri-gen";
 
 export default {
-  plugins: [
-    sri({
-      algorithm: "sha384", // 'sha256' | 'sha384' | 'sha512' (default: 'sha384')
-      crossorigin: "anonymous", // 'anonymous' | 'use-credentials' | undefined
-      fetchCache: true, // cache remote fetches in-memory and dedupe concurrent requests (default: true)
-      fetchTimeoutMs: 5000, // abort remote fetches after N ms; 0 disables timeout (default: 5000)
-      skipResources: [], // skip SRI for resources matching these patterns (default: [])
-      verboseLogging: true, // show all info-level build logs (default: false)
-    }),
-  ],
-};
-```
-
-During build, the plugin updates index.html in memory and adds an integrity attribute to scripts, stylesheets, and modulepreload links. If crossorigin is provided, it is also added.
-
-Advanced (optional): you can enable automatic rel="modulepreload" injection for lazy-loaded chunks and a CSP-safe runtime patch that sets integrity on dynamically inserted tags. See the Configuration section.
-
-TypeScript/ESM notes:
-
-- The package ships ESM only with types. Import as `import sri from 'vite-plugin-sri-gen'`.
-
-## Dev mode
-
-SRI is intentionally disabled during the Vite dev server. Use this plugin for build output only.
-
-Why dev SRI doesn’t help:
-
-- HMR bypasses SRI entirely: code updates are delivered over WebSocket and inlined into the page, not via normal `script`/`link` fetches that support integrity checks.
-- Non-stable module URLs: the dev server rewrites ESM imports and appends timestamps/query params. Content changes frequently during edits, so any integrity value would break on each save.
-- No transitive guarantees: browsers don’t enforce SRI for modules imported by a script with integrity. Each module request would need its own integrity, which the browser won’t verify in dev.
-- Partial coverage is misleading: hashing only top-level tags (or some assets) provides a false sense of security while leaving the rest of the module graph and HMR updates unverified.
-
-Conclusion: SRI is enforced only for build outputs, where assets are content-addressed and stable. That’s when browsers can reliably validate integrity and you get real protection.
-
-## Configuration
-
-```ts
-type SriPluginOptions = {
-  algorithm?: "sha256" | "sha384" | "sha512"; // default: 'sha384'
-  crossorigin?: "anonymous" | "use-credentials"; // default: undefined
-  fetchCache?: boolean; // default: true (in-memory cache + in-flight dedupe for remote assets)
-  fetchTimeoutMs?: number; // default: 5000 (5 seconds). Abort remote fetches after N ms, 0 to disable timeout
-  preloadDynamicChunks?: boolean; // default: true. Inject rel="modulepreload" with integrity for discovered lazy chunks. When false, dynamic imports are covered by the injected import map where possible (HTML-only bundle, root-relative/absolute base); JS-level import() rewriting is the fallback for no-HTML, mixed HTML+manifest, or relative-base builds.
-  runtimePatchDynamicLinks?: boolean; // default: true. Inject a tiny runtime that adds integrity to dynamically created <script>/<link>
-  skipResources?: string[]; // default: []. Skip SRI for resources matching these patterns (by id or src/href)
-  verboseLogging?: boolean; // default: false. Show all info-level build logs. When false, only warnings, errors, and a completion summary are shown.
-};
-```
-
-Notes:
-
-- Remote assets (http/https) are fetched at build to compute hashes. Protocol-relative URLs (//cdn.example.com/foo.js) are supported and treated as https.
-- Local assets are read from the build bundle output.
-- Existing integrity attributes are preserved and not overwritten.
-- If an asset cannot be found in the bundle, it is skipped.
-- Invalid or unsupported algorithms are automatically replaced with 'sha384' and a warning is logged.
-- Caching: when enabled, remote fetches are cached in-memory per build and concurrent requests are deduplicated.
-- Timeout: when a non-zero fetchTimeoutMs is set, slow remote fetches are aborted and the affected elements are left unchanged (a warning is logged).
-- Logging: by default, the plugin runs quietly — only warnings, errors, and a single completion summary line are printed. Set `verboseLogging: true` to see detailed step-by-step info messages during the build.
-
-### Skipping Resources
-
-You can exclude specific resources from SRI generation using the `skipResources` option. This is useful for third-party scripts, analytics, or dynamically-loaded content that may change frequently:
-
-```ts
-sri({
-  skipResources: [
-    "analytics-script", // Skip by element ID
-    "https://www.googletagmanager.com/*", // Skip by URL pattern
-    "vendor-*", // Skip vendor assets by pattern
-    "*.googleapis.com/*", // Skip Google APIs
-  ],
-});
-```
-
-**Pattern Types:**
-
-- **Element ID**: Matches the `id` attribute value exactly (`'analytics-script'`)
-- **URL Exact Match**: Matches `src` or `href` attribute exactly (`'https://example.com/script.js'`)
-- **URL Glob Pattern**: Use `*` as wildcard in URL patterns (`'*.googleapis.com/*'`, `'vendor-*'`)
-
-**Use Cases:**
-
-- Third-party analytics scripts that change frequently
-- A/B testing scripts with dynamic content
-- CDN resources that may be modified by the provider
-- Development/staging resources that shouldn't have integrity checks
-
-> [!WARNING]  
-> Skipped elements will not have `integrity` attributes added, allowing them to be modified by CDNs or served with different content without breaking the page.
-
-### Lazy-loaded chunks and dynamic tags
-
-- Whenever the build emits HTML (and `base` is root-relative or an absolute URL), the plugin injects a `<script type="importmap">` into each HTML file with an [`integrity`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap#integrity_metadata_map) object covering every emitted JS module. Browsers with import map integrity support (Chrome 127+, Firefox 138+, Safari 18+) enforce SRI natively on **both static and dynamic** module imports — including statically imported chunks (such as facade re-exports) that `modulepreload` discovery never scans. Older browsers ignore the `integrity` key (progressive enhancement, the same model as SRI attributes generally). If your HTML already declares an import map, the integrity entries are merged into it; your own entries win on conflict. See [Import Map Integrity](#import-map-integrity).
-- If `preloadDynamicChunks` is enabled (default), the plugin additionally scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` for them into emitted HTML, honoring Vite `base` and `crossorigin`. Browser-native SRI then validates each lazy chunk via its preload entry (and preloading changes network timing: lazy chunks are fetched eagerly).
-- If `preloadDynamicChunks` is disabled and the import map cannot cover every consumer of the bundle (no HTML in the bundle — e.g. backend-owned HTML consuming `manifest.json` — a manifest emitted **alongside** HTML, or a relative `base` like `'./'`), the plugin falls back to enforcing SRI at the JavaScript layer: every dynamic `import(...)` call site in the bundle is rewritten to a runtime helper that fetches the chunk, verifies its hash against the build-time integrity using `crypto.subtle`, and only then performs the native import. A mismatch throws and aborts module loading. This fallback requires `runtimePatchDynamicLinks` (default on), a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) for `crypto.subtle` (HTTPS or localhost), and matching CORS configuration on the server hosting the chunks. The helper performs a separate verification fetch in addition to the browser's own module fetch — keep `Cache-Control: immutable` (or equivalent) on hashed chunk filenames to avoid a true second network round-trip. Source maps for chunks whose `import()` call sites are rewritten are dropped (the rewrite shifts byte offsets). Builds covered by the import map have none of these constraints.
-- If `runtimePatchDynamicLinks` is enabled (default), a tiny runtime is prepended to entry chunks. It sets `integrity` (and `crossorigin` if configured) on dynamically created `<script>` and `<link>` elements for eligible resources (scripts, stylesheets, modulepreload, or preload as=script/style/font) before the network request happens. This is bundled code (not inline) and is CSP-safe.
-
-## Import Map Integrity
-
-When the build emits HTML, SRI for module chunks is declared in an injected import map:
-
-```html
-<script type="importmap">
-{"integrity":{"/assets/index-B3sb0LQp.js":"sha384-…","/assets/chunk-Cab12xJ4.js":"sha384-…"}}
-</script>
-```
-
-Supporting browsers (Chrome 127+, Firefox 138+, Safari 18+) apply the integrity metadata to every matching module fetch — static imports, dynamic `import()`, and module preloads alike — and refuse to execute a module whose bytes do not match.
-
-Notes:
-
-- **CSP:** the import map is necessarily an inline script (the HTML spec forbids `src` on import maps). Strict `script-src` policies without `'unsafe-inline'` must allow it via a nonce (server-side templating) or a hash — note the hash changes every build, since the map contains the chunk hashes.
-- **Workers:** import maps do not apply inside Web Workers or Service Workers; module chunks loaded there are not covered (the JS-runtime fallback does not cover them either).
-- **Relative `base`:** with `base: './'` (or `''`/`'../…'`), import map keys cannot be expressed portably (keys resolve against each document's URL), so injection is skipped and the JS-runtime fallback remains active for `preloadDynamicChunks: false` builds.
-- **Older browsers:** Chrome < 127, Firefox < 138, and Safari < 18 parse the map but ignore `integrity` — module loads proceed unverified there, exactly as HTML `integrity` attributes behave on browsers without SRI support. Note that with `runtimePatchDynamicLinks: false` there is no JS-runtime fallback of any kind, so on those older browsers dynamic imports are entirely unverified regardless of the import map.
-- **Resources excluded via `skipResources`** are also excluded from the import map, so the opt-out applies to native module-fetch enforcement too.
-
-## Runtime Patching
-
-When `runtimePatchDynamicLinks` is enabled (default), the plugin injects a small runtime into entry chunks that patches DOM manipulation methods to automatically add integrity attributes to dynamically created elements.
-
-### How it works
-
-The runtime patches these DOM methods:
-
-- `Element.prototype.setAttribute` - Intercepts `src` and `href` attribute assignments
-- `Node.prototype.appendChild` - Intercepts element insertion
-- `Element.prototype.append/prepend/insertBefore` - Intercepts element insertion
-
-When code dynamically creates `<script>` or `<link>` elements and sets their `src`/`href` attributes, the runtime automatically adds the appropriate `integrity` and `crossorigin` attributes if a matching hash exists in the SRI map.
-
-### Eligible elements
-
-The runtime only processes elements that are eligible for SRI:
-
-- `<script>` elements with `src` attributes
-- `<link>` elements with `rel="stylesheet"`
-- `<link>` elements with `rel="modulepreload"`
-- `<link>` elements with `rel="preload"` and `as="script|style|font"`
-
-### Skip patterns
-
-The runtime respects `skipResources` patterns, allowing you to exclude specific resources from automatic SRI injection even when created dynamically.
-
-## Vite Manifest Integration
-
-When Vite emits a build manifest (`build.manifest: true`), this plugin automatically augments it with integrity values. This is useful when your backend owns HTML generation and reads the manifest to know which assets to load — the backend can now attach `integrity` without re-hashing the files.
-
-The feature is automatic and purely additive: if no manifest is emitted, nothing changes. It runs even when the bundle emits no HTML files, which is the common case for backend-owned HTML generation. Both the modern `.vite/manifest.json` (Vite ≥ 4.3) and the legacy `manifest.json` locations are recognized. Custom manifest filenames (when `build.manifest` is set to a string ending in `manifest.json`) are also detected, but only augmented if their contents match the Vite manifest shape — so unrelated JSON assets that happen to share the suffix (e.g. PWA Web App manifests) are left alone. The SSR manifest (`.vite/ssr-manifest.json`) is never touched — it has a different schema.
-
-### Augmented schema
-
-Two fields are added per entry:
-
-- `integrity` — SRI hash for the entry's primary `file`, when the file is a JS or CSS asset the plugin already hashes.
-- `cssIntegrity` — parallel `(string | null)[]` array aligned 1:1 with `css[]`. A `null` at index `i` means `css[i]` has no hash (non-JS/CSS file, or excluded via `skipResources`).
-
-Both fields are appended to each entry, so they appear after any existing Vite-emitted keys in the serialized JSON. Example manifest after augmentation:
-
-```json
-{
-  "src/main.tsx": {
-    "file": "assets/main-XYZ.js",
-    "src": "src/main.tsx",
-    "isEntry": true,
-    "css": ["assets/main-ABC.css"],
-    "imports": ["_shared-GHI.js"],
-    "integrity": "sha384-...",
-    "cssIntegrity": ["sha384-..."]
-  },
-  "_shared-GHI.js": {
-    "file": "_shared-GHI.js",
-    "integrity": "sha384-..."
-  }
-}
-```
-
-Consumers resolve `imports` / `dynamicImports` by key lookup into the manifest, so no special handling of those arrays is needed.
-
-### Notes
-
-- Existing `integrity` or `cssIntegrity` values on an entry are preserved and never overwritten.
-- `skipResources` patterns are honored: matching files get no integrity in the manifest, keeping behavior consistent with HTML injection and runtime patching.
-- Only JS and CSS files are hashed (matching the rest of the plugin). Entries in `assets` (images, fonts, etc.) are untouched.
-- If the manifest fails to parse, a warning is logged and the asset is left unchanged; the rest of the build continues.
-
-## Compatibility
-
-- SPA (appType: 'spa'): supported. transformIndexHtml runs at build to add SRI to index.html.
-- MPA: supported. generateBundle scans emitted .html files and injects SRI.
-- SSR/SSG: prerendered/static HTML is supported via generateBundle. For pure SSR server output (no .html emitted), there's nothing to modify at build time.
-- Node 18+ only (uses global fetch). ESM-only package.
-
-When building for SSR, if no HTML files are emitted, the plugin logs a warning to help diagnose why SRI wasn't applied:
-
-```bash
-No emitted HTML detected during SSR build. SRI can only be added to HTML files; pure SSR server output will be skipped.
-```
-
-## Examples
-
-### MPA (multiple HTML entry points)
-
-Configure multiple HTML inputs so Vite emits several .html files. The plugin will inject SRI into all of them:
-
-```ts
-// vite.config.ts
-import { defineConfig } from "vite";
-import sri from "vite-plugin-sri-gen";
-
-export default defineConfig({
-  build: {
-    rollupOptions: {
-      input: {
-        main: "index.html",
-        about: "about/index.html",
-        admin: "admin/index.html",
-      },
-    },
-  },
-  plugins: [sri({ crossorigin: "anonymous" })],
-});
-```
-
-### SSR/SSG with prerendered HTML
-
-If your SSR/SSG setup emits static HTML during build (for example via a prerender step), the plugin will add SRI to those files automatically via generateBundle:
-
-```ts
-// vite.config.ts
-import { defineConfig } from "vite";
-import sri from "vite-plugin-sri-gen";
-
-export default defineConfig({
-  // Your SSR/SSG tooling may set build.ssr, use a prerender plugin/step, etc.
   plugins: [sri()],
-});
-```
-
-Notes:
-
-- If no HTML is emitted (pure SSR server output), you’ll see a warning and nothing is changed.
-- You don’t need extra configuration for SRI; inclusion of the plugin is enough when HTML files are produced.
-
-### Advanced: networking controls
-
-Tune caching and timeouts for remote assets:
-
-```ts
-import sri from "vite-plugin-sri-gen";
-
-export default {
-  plugins: [
-    sri({
-      crossorigin: "anonymous",
-      fetchCache: true, // keep enabled for best performance
-      fetchTimeoutMs: 5000, // fail fast if a CDN becomes slow or unresponsive
-    }),
-  ],
 };
 ```
 
-## Why ESM-only?
+That's it — every build gets SRI with sensible defaults. See the
+[configuration reference](https://rbonestell.com/vite-plugin-sri-gen/configure/options)
+for `algorithm`, `crossorigin`, skip patterns, and more.
 
-Vite and modern Node tooling are native ESM-first. Dropping CommonJS simplifies the package and aligns with Vite expectations.
+> [!IMPORTANT]
+> Pure SSR output (HTML rendered at request time) cannot be modified at build time. Prerendered
+> HTML works normally, and backends that render their own HTML can consume SRI hashes from the
+> [augmented Vite manifest](https://rbonestell.com/vite-plugin-sri-gen/integrate/backend-manifest).
+> Details: [SSR, SSG & Prerendering](https://rbonestell.com/vite-plugin-sri-gen/integrate/ssr-ssg).
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for the fork/branch/PR workflow (git-flow style with prefixes like `feat/`, `fix/`, `bug/`) and the testing/linting expectations.
+Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for the fork/branch/PR workflow and the testing/linting expectations.
 
 ## Security
 
-See [SECURITY.md](./SECURITY.md) for supported versions and how to report vulnerabilities via the repository’s Security section.
+See [SECURITY.md](./SECURITY.md) for supported versions and how to report vulnerabilities.
 
 ## License
 

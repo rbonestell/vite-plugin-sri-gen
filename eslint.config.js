@@ -55,6 +55,6 @@ export default [
 	},
 	{
 		// Common folders to ignore
-		ignores: ["dist/**", "coverage/**", "node_modules/**"],
+		ignores: ["dist/**", "coverage/**", "node_modules/**", "docs/.vitepress/dist/**", "docs/.vitepress/cache/**"],
 	},
 ];
