@@ -156,6 +156,39 @@ export function joinBaseHref(base: string, chunkFile: string): string {
 }
 
 /**
+ * Whether the resolved Vite `base` can produce valid import map `integrity`
+ * keys. Import map keys must be URL-like — root-relative (`/...`),
+ * `./`/`../`-relative, or absolute URLs. The plugin only emits root-relative
+ * or absolute keys: a relative base (`./`, `../x/`, "") would require
+ * document-relative keys, which break for HTML pages in subdirectories
+ * (keys resolve against the DOCUMENT URL, not the deploy root).
+ */
+export function isImportMapCapableBase(base: string): boolean {
+	return base.startsWith("/") || isHttpUrl(base);
+}
+
+/**
+ * Builds the import map `integrity` object: emitted JS/MJS module URL → SRI
+ * metadata. Keys are joined with the configured Vite `base` exactly like
+ * injected modulepreload hrefs (see joinBaseHref), so they match the URLs the
+ * browser actually requests. Returns null when `base` is relative (no valid
+ * keys can be produced — see isImportMapCapableBase).
+ */
+export function buildImportIntegrityObject(
+	sriByPathname: Record<string, string>,
+	base: string
+): Record<string, string> | null {
+	if (!isImportMapCapableBase(base)) return null;
+	const result: Record<string, string> = {};
+	for (const [pathname, integrity] of Object.entries(sriByPathname)) {
+		if (!/\.m?js$/i.test(pathname)) continue;
+		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+		result[joinBaseHref(base, fileName)] = integrity;
+	}
+	return result;
+}
+
+/**
  * Extracts the pathname from a resource URL, handling absolute CDN URLs.
  * When the resource URL is an absolute HTTP/HTTPS URL, extracts just the pathname
  * portion for hash lookup. For relative or root-relative URLs, normalizes them

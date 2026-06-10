@@ -16,6 +16,8 @@ import {
 	IntegrityProcessor,
 	isEligibleForSri,
 	isHttpUrl,
+	isImportMapCapableBase,
+	buildImportIntegrityObject,
 	joinBaseHref,
 	loadResource,
 	ManifestProcessor,
@@ -132,6 +134,66 @@ describe("Internal Utility Functions", () => {
 
 		it("falls through to path.posix.join for empty base", () => {
 			expect(joinBaseHref("", "chunk.js")).toBe("chunk.js");
+		});
+	});
+
+	describe("isImportMapCapableBase", () => {
+		it("accepts root-relative and absolute-URL bases", () => {
+			expect(isImportMapCapableBase("/")).toBe(true);
+			expect(isImportMapCapableBase("/app/")).toBe(true);
+			expect(isImportMapCapableBase("https://cdn.example.com/")).toBe(true);
+			expect(isImportMapCapableBase("//cdn.example.com/")).toBe(true);
+		});
+
+		it("rejects relative and empty bases (keys would be bare specifiers)", () => {
+			expect(isImportMapCapableBase("./")).toBe(false);
+			expect(isImportMapCapableBase("../nested/")).toBe(false);
+			expect(isImportMapCapableBase("")).toBe(false);
+		});
+	});
+
+	describe("buildImportIntegrityObject", () => {
+		const map = {
+			"/assets/entry.js": "sha384-AAA",
+			"/assets/chunk-B.mjs": "sha384-BBB",
+			"/assets/style.css": "sha384-CCC",
+		};
+
+		it("maps JS/MJS pathnames to base-joined URL keys with base '/'", () => {
+			expect(buildImportIntegrityObject(map, "/")).toEqual({
+				"/assets/entry.js": "sha384-AAA",
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("prefixes sub-path base", () => {
+			expect(buildImportIntegrityObject(map, "/app/")).toEqual({
+				"/app/assets/entry.js": "sha384-AAA",
+				"/app/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("produces absolute URL keys for CDN base", () => {
+			expect(
+				buildImportIntegrityObject(map, "https://cdn.example.com/")
+			).toEqual({
+				"https://cdn.example.com/assets/entry.js": "sha384-AAA",
+				"https://cdn.example.com/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("returns null for relative bases", () => {
+			expect(buildImportIntegrityObject(map, "./")).toBeNull();
+			expect(buildImportIntegrityObject(map, "")).toBeNull();
+		});
+
+		it("excludes non-module assets and returns {} when nothing qualifies", () => {
+			expect(
+				buildImportIntegrityObject(
+					{ "/assets/style.css": "sha384-CCC" },
+					"/"
+				)
+			).toEqual({});
 		});
 
 		it("strips leading slash from chunk file with absolute URL base", () => {
