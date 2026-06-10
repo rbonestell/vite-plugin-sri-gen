@@ -2811,4 +2811,62 @@ describe("import map SRI", () => {
 			warnSpy.mockRestore();
 		}
 	});
+
+	it("keeps a leading meta charset before the injected import map", async () => {
+		const { plugin, bundle } = buildPluginBundle(
+			"/",
+			'<!doctype html><html><head><meta charset="utf-8"><title>t</title></head><body></body></html>'
+		);
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const charsetIdx = html.indexOf("<meta charset");
+		const mapIdx = html.indexOf('<script type="importmap">');
+		expect(charsetIdx).toBeGreaterThan(-1);
+		expect(mapIdx).toBeGreaterThan(-1);
+		// The charset declaration must stay within the first 1024 bytes; the
+		// import map grows with chunk count, so it goes after the charset.
+		expect(charsetIdx).toBeLessThan(mapIdx);
+	});
+
+	it("keeps a leading meta charset ahead of the import map and modulepreload links in default preload mode", async () => {
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": {
+				type: "asset",
+				source: '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>',
+			},
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const charsetIdx = html.indexOf("<meta charset");
+		const mapIdx = html.indexOf('<script type="importmap">');
+		const preloadIdx = html.indexOf('rel="modulepreload"');
+		expect(charsetIdx).toBeGreaterThan(-1);
+		expect(mapIdx).toBeGreaterThan(-1);
+		expect(preloadIdx).toBeGreaterThan(-1);
+		// charset first, then the import map, then the preload links — the
+		// map must still precede every modulepreload link and module script.
+		expect(charsetIdx).toBeLessThan(mapIdx);
+		expect(mapIdx).toBeLessThan(preloadIdx);
+	});
+
+	it("injects the import map at the start of head when no charset meta is present", async () => {
+		const { plugin, bundle } = buildPluginBundle(
+			"/",
+			"<!doctype html><html><head><title>t</title></head><body></body></html>"
+		);
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const headIdx = html.indexOf("<head>");
+		const mapIdx = html.indexOf('<script type="importmap">');
+		const titleIdx = html.indexOf("<title>");
+		expect(mapIdx).toBe(headIdx + "<head>".length);
+		expect(mapIdx).toBeLessThan(titleIdx);
+	});
 });

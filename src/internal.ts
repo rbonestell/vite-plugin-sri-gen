@@ -609,6 +609,39 @@ function getAttrValue(element: Element, name: string): string | undefined {
 }
 
 /**
+ * Index in head.childNodes at which plugin-injected elements (import map,
+ * modulepreload links) should be inserted. The HTML spec wants the charset
+ * declaration within the first 1024 bytes of the document, and the injected
+ * content grows with chunk count — so insertion goes AFTER a
+ * charset-declaring <meta>, provided it appears before any script or link
+ * element (the import map must precede those). Falls back to the start of
+ * head otherwise.
+ */
+function headInjectionIndex(head: Element): number {
+	if (!head.childNodes) return 0;
+	for (let i = 0; i < head.childNodes.length; i++) {
+		const node = head.childNodes[i];
+		if (!("tagName" in node)) continue; // text/comment nodes
+		const el = node as Element;
+		const tag = el.tagName?.toLowerCase();
+		if (tag === "meta") {
+			const httpEquiv = getAttrValue(el, "http-equiv")?.toLowerCase();
+			if (
+				getAttrValue(el, "charset") !== undefined ||
+				httpEquiv === "content-type"
+			) {
+				return i + 1;
+			}
+			continue;
+		}
+		// A script or link already precedes any charset meta — injected
+		// content must come before it, so insert at the head start.
+		if (tag === "script" || tag === "link") return 0;
+	}
+	return 0;
+}
+
+/**
  * Helper function to set attribute value on parse5 element
  * @param element - parse5 Element
  * @param name - Attribute name
@@ -1876,11 +1909,13 @@ export class HtmlProcessor {
 			});
 		}
 
-		// Add the link element to the beginning of head
+		// Insert at the head start, but after a leading charset meta — the
+		// charset declaration must stay within the first 1024 bytes and the
+		// number of injected links grows with chunk count.
 		if (!head.childNodes) {
 			head.childNodes = [];
 		}
-		head.childNodes.unshift(linkElement);
+		head.childNodes.splice(headInjectionIndex(head), 0, linkElement);
 
 		return true;
 	}
@@ -1894,9 +1929,10 @@ export class HtmlProcessor {
 	 * `integrity` key (progressive enhancement, same model as SRI attributes
 	 * generally).
 	 *
-	 * Must run AFTER addDynamicChunkPreloads: both prepend via
-	 * head.childNodes.unshift, so running last places the import map FIRST —
-	 * the spec requires it before any module script or modulepreload link.
+	 * Must run AFTER addDynamicChunkPreloads: both insert at the same
+	 * computed head position (see headInjectionIndex), so running last places
+	 * the import map ahead of the injected links — the spec requires it
+	 * before any module script or modulepreload link.
 	 *
 	 * No-ops (returning the input unchanged) when: base is relative (the
 	 * resulting keys — bare or document-relative — cannot be used portably
@@ -2028,7 +2064,12 @@ export class HtmlProcessor {
 				};
 				(textNode as any).parentNode = importMapEl;
 				if (!head.childNodes) head.childNodes = [];
-				head.childNodes.unshift(importMapEl);
+				// Same insertion point the preload links use: after a leading
+				// charset meta (which must stay within the first 1024 bytes —
+				// the map grows with chunk count), otherwise the head start.
+				// Inserting at the same index AFTER the preload pass places
+				// the map before every injected link.
+				head.childNodes.splice(headInjectionIndex(head), 0, importMapEl);
 			}
 
 			return serialize(document);
