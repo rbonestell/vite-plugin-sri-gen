@@ -194,7 +194,7 @@ export default {
   plugins: [
     sri({
       skipResources: [
-        'analytics-script',              // exact element ID match
+        'analytics-script',              // element ID match (globs work here too)
         'https://www.googletagmanager.com/*', // URL glob
         'vendor-*',                      // filename glob
       ],

@@ -30,10 +30,11 @@ export default {
 
 Three kinds of patterns are supported:
 
-**Element ID exact match** — matches the `id` attribute value of the element exactly.
+**Element ID match** — matches the `id` attribute value. The same glob engine applies, so `*` wildcards work here just as they do for URLs. Matching is anchored and case-sensitive.
 
 ```ts
-skipResources: ['analytics-script']
+skipResources: ['analytics-script']   // exact ID
+skipResources: ['analytics-*']        // matches id="analytics-v2", id="analytics-prod", etc.
 // matches: <script id="analytics-script" src="...">
 ```
 
