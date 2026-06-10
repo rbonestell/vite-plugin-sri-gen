@@ -7,10 +7,10 @@ on:
     paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
+      - "package.json"
+      - "package-lock.json"
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -19,9 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+          cache: "npm"
       - name: Install Dependencies
         run: npm ci
       - name: Build Docs
@@ -33,6 +36,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
