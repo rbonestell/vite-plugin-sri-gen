@@ -48,7 +48,7 @@ Only **JavaScript** (`.js`, `.mjs`) and **CSS** (`.css`) files are hashed. Other
 
 Two additional rules apply regardless of asset origin:
 
-- **Hand-written `integrity` attributes are recomputed.** The plugin computes integrity from the built output and sets it on every eligible tag, replacing any existing value. (Manifest augmentation and runtime patching, by contrast, leave existing values untouched.)
+- **Hand-written `integrity` attributes are recomputed.** The plugin computes integrity from the built output and sets it on every eligible tag, replacing any existing value — unlike manifest augmentation and runtime patching, which leave existing values untouched.
 - **Assets not found in the bundle are skipped.** If a local file reference doesn't resolve to anything in the bundle output, that element is left unchanged (no `integrity` added, no error thrown).
 
 ## Why Build Time, Not Runtime

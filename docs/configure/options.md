@@ -36,7 +36,7 @@ Controls the hash algorithm used for every integrity value the plugin emits — 
 
 All three values (`sha256`, `sha384`, `sha512`) are strong enough for this use case. `sha384` is the default because it offers a good balance of hash length and security margin. See [Choosing an Algorithm](/learn/what-is-sri#choosing-an-algorithm) for a comparison.
 
-::: warning Invalid algorithm values fall back to sha384
+::: warning Invalid algorithm values fall back to `'sha384'`
 If you pass a value that is not one of the three supported strings, the plugin replaces it with `'sha384'` at build time and logs a warning. This handles cases where the option is set dynamically from a variable that might be misconfigured.
 :::
 
@@ -84,9 +84,7 @@ Enables in-memory caching for remote asset fetches. When on, the first successfu
 
 **Default:** `true`
 
-::: tip
-Builds with no remote assets never make network requests regardless of this setting.
-:::
+This setting has no effect when your build has no remote assets.
 
 ```ts
 // vite.config.ts

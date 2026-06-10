@@ -33,7 +33,7 @@ See [`fetchTimeoutMs`](/configure/options#fetchtimeoutms) in the options referen
 
 ## Example
 
-Tuning both options for a build that fetches from a CDN where you want fast failure if anything becomes unresponsive:
+Tightening the timeout for a build that fetches from an external CDN — fail fast rather than letting a slow or unresponsive host stall the build:
 
 ```ts
 // vite.config.ts
@@ -43,8 +43,7 @@ export default {
   plugins: [
     sri({
       crossorigin: 'anonymous',
-      fetchCache: true,       // keep enabled for best performance
-      fetchTimeoutMs: 5000,   // fail fast if a CDN becomes slow or unresponsive
+      fetchTimeoutMs: 3000, // tighter deadline for flaky or external CDNs
     }),
   ],
 }

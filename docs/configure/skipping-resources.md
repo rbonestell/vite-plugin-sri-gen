@@ -1,6 +1,6 @@
 # Skipping Resources
 
-Some resources should not have integrity attributes. Third-party analytics scripts are updated by the vendor without notice. A/B testing tools serve intentionally varying content. CDN assets delivered from a provider's infrastructure may be rewritten by edge workers or personalisation layers before they reach the browser. Adding an integrity hash to these resources would break your page every time the bytes change.
+Some resources should not have integrity attributes. Third-party analytics scripts are updated by the vendor without notice. A/B testing tools serve intentionally varying content. CDN assets delivered from a provider's infrastructure may be rewritten by edge workers or personalization layers before they reach the browser. Adding an integrity hash to these resources would break your page every time the bytes change.
 
 The `skipResources` option lets you exclude specific resources from all SRI processing.
 
@@ -62,7 +62,7 @@ Typical resources to exclude:
 
 - **Third-party analytics** — scripts managed by marketing platforms that update their own CDN without coordinating a release with you
 - **A/B testing tools** — scripts that serve different variants per request by design
-- **CDN resources that mutate** — assets delivered through a provider's edge network that may rewrite content (personalisation, compression, minification proxies)
+- **CDN resources that mutate** — assets delivered through a provider's edge network that may rewrite content (personalization, compression, minification proxies)
 - **Development or staging scripts** — scripts that are only present in non-production environments and change frequently
 
 ## One Opt-Out, Everywhere
