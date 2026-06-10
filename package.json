@@ -55,7 +55,7 @@
 		"web-security",
 		"content-security-policy"
 	],
-	"homepage": "https://github.com/rbonestell/vite-plugin-sri-gen",
+	"homepage": "https://rbonestell.com/vite-plugin-sri-gen/",
 	"bugs": {
 		"url": "https://github.com/rbonestell/vite-plugin-sri-gen/issues"
 	},
