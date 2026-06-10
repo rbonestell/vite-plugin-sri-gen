@@ -2529,3 +2529,114 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(sandbox.r).toBe("</script>");
 	});
 });
+
+describe("import map SRI", () => {
+	function buildPluginBundle(base = "/", html = htmlDoc("")) {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: true,
+		}) as any;
+		plugin.configResolved?.({ base, build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: html },
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		return { plugin, bundle };
+	}
+
+	it("injects an import map with integrity entries for every JS chunk", async () => {
+		const { plugin, bundle } = buildPluginBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		expect(m).toBeTruthy();
+		const parsed = JSON.parse(m![1]);
+		expect(parsed.integrity["/assets/entry.js"]).toMatch(/^sha256-/);
+		expect(parsed.integrity["/assets/lazy.js"]).toMatch(/^sha256-/);
+	});
+
+	it("does not rewrite import() and disables runtime enforcement when the import map is emitted", async () => {
+		const { plugin, bundle } = buildPluginBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+		expect(entryCode).toContain("import('./lazy.js')");
+		expect(entryCode).not.toContain("__sriImport(import.meta.url");
+		expect(entryCode).toContain("enforceDynamicImports: false");
+		expect(entryCode).toContain("installSriRuntime"); // DOM patching stays
+	});
+
+	it("injects the import map in default preload mode too, before modulepreload links", async () => {
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": { type: "asset", source: htmlDoc("") },
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const mapIdx = html.indexOf('<script type="importmap">');
+		const preloadIdx = html.indexOf('rel="modulepreload"');
+		expect(mapIdx).toBeGreaterThan(-1);
+		expect(preloadIdx).toBeGreaterThan(-1);
+		expect(mapIdx).toBeLessThan(preloadIdx);
+	});
+
+	it("merges integrity into an existing import map without overwriting user entries", async () => {
+		const existing =
+			'<script type="importmap">{"imports":{"lodash":"/vendor/lodash.js"},"integrity":{"/assets/entry.js":"sha256-USER"}}</script>';
+		const { plugin, bundle } = buildPluginBundle(
+			"/",
+			`<!doctype html><html><head>${existing}</head><body></body></html>`
+		);
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		const maps = html.match(/<script type="importmap">/g) ?? [];
+		expect(maps.length).toBe(1); // merged, not duplicated
+		const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+		const parsed = JSON.parse(m![1]);
+		expect(parsed.imports.lodash).toBe("/vendor/lodash.js"); // preserved
+		expect(parsed.integrity["/assets/entry.js"]).toBe("sha256-USER"); // user wins
+		expect(parsed.integrity["/assets/lazy.js"]).toMatch(/^sha256-/); // ours added
+	});
+
+	it("skips injection and keeps the runtime enforcement path for relative base", async () => {
+		const { plugin, bundle } = buildPluginBundle("./");
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		expect(html).not.toContain("importmap");
+		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+		expect(entryCode).toContain("__sriImport(import.meta.url");
+		expect(entryCode).toContain("enforceDynamicImports: true");
+	});
+
+	it("leaves HTML untouched when an existing import map has malformed JSON", async () => {
+		const existing = '<script type="importmap">{not json}</script>';
+		const { plugin, bundle } = buildPluginBundle(
+			"/",
+			`<!doctype html><html><head>${existing}</head><body></body></html>`
+		);
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+		expect(html).toContain("{not json}"); // unmodified
+		const maps = html.match(/<script type="importmap">/g) ?? [];
+		expect(maps.length).toBe(1); // no second map added
+	});
+
+	it("preserves source maps when the rewrite is skipped (HTML present)", async () => {
+		const { plugin, bundle } = buildPluginBundle();
+		(bundle["assets/entry.js"] as any).map = { mappings: "AAAA" };
+		await plugin.generateBundle.handler({}, bundle as any);
+		expect((bundle["assets/entry.js"] as any).map).toEqual({
+			mappings: "AAAA",
+		});
+	});
+});

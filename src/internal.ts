@@ -10,6 +10,7 @@ import { defaultDependencies } from "./dom-abstraction";
 type Document = DefaultTreeAdapterTypes.Document;
 type Element = DefaultTreeAdapterTypes.Element;
 type ChildNode = DefaultTreeAdapterTypes.ChildNode;
+type TextNode = DefaultTreeAdapterTypes.TextNode;
 
 // =======================================================
 // #region INTERFACES AND TYPES
@@ -100,6 +101,19 @@ export interface HtmlProcessorConfig {
  */
 export function isHttpUrl(url: unknown): boolean {
 	return typeof url === "string" && /^(https?:)?\/\//i.test(url);
+}
+
+/**
+ * Escapes characters that could terminate the surrounding <script> context
+ * or break JS parsing when JSON is inlined into HTML. The replacements are
+ * valid JSON escapes, so JSON.parse on the result is unaffected. Mirrors
+ * `escapeForScript` in index.ts (kept local to avoid a module cycle).
+ */
+function escapeForScriptInternal(json: string): string {
+	return json
+		.replace(/</g, "\\u003c")
+		.replace(/\u2028/g, "\\u2028")
+		.replace(/\u2029/g, "\\u2029");
 }
 
 /**
@@ -1594,10 +1608,22 @@ export class HtmlProcessor {
 		}
 
 		// ========================================================================
+		// IMPORT MAP INTEGRITY INJECTION
+		// ========================================================================
+
+		// Step 3: Inject import map integrity (runs after preload injection so
+		// the unshift places the map BEFORE the modulepreload links).
+		processedHtml = this.injectImportMap(
+			processedHtml,
+			sriByPathname,
+			fileName
+		);
+
+		// ========================================================================
 		// BUNDLE UPDATE
 		// ========================================================================
 
-		// Step 3: Update asset source with processed HTML
+		// Step 4: Update asset source with processed HTML
 		asset.source = processedHtml;
 	}
 
@@ -1833,6 +1859,130 @@ export class HtmlProcessor {
 		head.childNodes.unshift(linkElement);
 
 		return true;
+	}
+
+	/**
+	 * Injects (or merges into) a `<script type="importmap">` carrying an
+	 * `integrity` object for every emitted JS module chunk. Browsers
+	 * supporting import map integrity (Chrome 127+, Firefox 138+,
+	 * Safari 18.4+) then enforce SRI natively on static AND dynamic module
+	 * imports — single fetch, no TOCTOU. Older browsers ignore the
+	 * `integrity` key (progressive enhancement, same model as SRI attributes
+	 * generally).
+	 *
+	 * Must run AFTER addDynamicChunkPreloads: both prepend via
+	 * head.childNodes.unshift, so running last places the import map FIRST —
+	 * the spec requires it before any module script or modulepreload link.
+	 *
+	 * No-ops (returning the input unchanged) when: base is relative (keys
+	 * would be bare specifiers), no JS chunks exist, <head> is missing, or an
+	 * existing import map contains unparseable JSON (warned).
+	 */
+	private injectImportMap(
+		htmlContent: string,
+		sriByPathname: Record<string, string>,
+		fileName: string
+	): string {
+		const integrityObject = buildImportIntegrityObject(
+			sriByPathname,
+			this.config.base
+		);
+		if (integrityObject === null) {
+			this.config.logger.info(
+				`Import map SRI skipped for ${fileName}: relative base "${this.config.base}" cannot produce valid import map keys`
+			);
+			return htmlContent;
+		}
+		if (Object.keys(integrityObject).length === 0) {
+			return htmlContent;
+		}
+
+		try {
+			const document = parse(htmlContent);
+			const head = findElements(
+				document,
+				(el) => el.nodeName?.toLowerCase() === "head"
+			)[0];
+			if (!head) {
+				this.config.logger.warn(
+					`No <head> element found in ${fileName}, skipping import map injection`
+				);
+				return htmlContent;
+			}
+
+			const existingMaps = findElements(head, (el) => {
+				if (el.nodeName?.toLowerCase() !== "script") return false;
+				return getAttrValue(el, "type")?.toLowerCase() === "importmap";
+			});
+
+			if (existingMaps.length > 0) {
+				// Browsers process multiple import maps inconsistently across
+				// versions — merge into the first map instead of adding
+				// another.
+				const existingEl = existingMaps[0];
+				const textChild = existingEl.childNodes.find(
+					(n): n is TextNode => n.nodeName === "#text"
+				);
+				let parsed: {
+					integrity?: Record<string, string>;
+					[k: string]: unknown;
+				};
+				try {
+					parsed = JSON.parse(textChild?.value ?? "{}");
+				} catch {
+					this.config.logger.warn(
+						`Existing <script type="importmap"> in ${fileName} contains invalid JSON; integrity entries not merged`
+					);
+					return htmlContent;
+				}
+				// User-authored integrity entries win on key collision.
+				parsed.integrity = {
+					...integrityObject,
+					...(parsed.integrity ?? {}),
+				};
+				const json = escapeForScriptInternal(JSON.stringify(parsed));
+				if (textChild) {
+					textChild.value = json;
+				} else {
+					existingEl.childNodes.push({
+						nodeName: "#text",
+						value: json,
+						parentNode: existingEl,
+					} as TextNode);
+				}
+			} else {
+				const json = escapeForScriptInternal(
+					JSON.stringify({ integrity: integrityObject })
+				);
+				const textNode = {
+					nodeName: "#text",
+					value: json,
+					parentNode: null,
+				} as unknown as TextNode;
+				const importMapEl: Element = {
+					nodeName: "script",
+					tagName: "script",
+					attrs: [{ name: "type", value: "importmap" }],
+					namespaceURI: "http://www.w3.org/1999/xhtml" as any,
+					childNodes: [textNode],
+					parentNode: head,
+					sourceCodeLocation: undefined,
+				};
+				(textNode as any).parentNode = importMapEl;
+				if (!head.childNodes) head.childNodes = [];
+				head.childNodes.unshift(importMapEl);
+			}
+
+			return serialize(document);
+		} catch (error) {
+			this.config.logger.error(
+				`Failed to inject import map into ${fileName}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				error instanceof Error ? error : undefined
+			);
+			return htmlContent;
+		}
 	}
 }
 
