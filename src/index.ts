@@ -8,6 +8,7 @@ import {
 	HtmlProcessor,
 	installSriRuntime,
 	IntegrityProcessor,
+	isImportMapCapableBase,
 	ManifestProcessor,
 	validateGenerateBundleInputs,
 } from "./internal";
@@ -268,12 +269,18 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// any hashing so the served bytes match the hashed bytes.
 						// Activation condition: the user has disabled the
 						// build-time modulepreload injection (preloadDynamicChunks
-						// is false), which means browser-native SRI on
-						// modulepreload cannot be relied upon to protect lazy
-						// chunks. In that case we substitute the global SRI
-						// verifier injected by the runtime so every dynamic
-						// import goes through a strict, in-JS integrity check.
-						const enforceDynamicImports = !preloadDynamicChunks;
+						// is false) AND the import map cannot be emitted. JS-level
+						// enforcement is the fallback for builds where the import
+						// map is impossible: no HTML in the bundle (backend-owned
+						// HTML / manifest consumers) or a relative base (no valid
+						// import map keys). Wherever the import map IS emitted it
+						// subsumes this path — the browser enforces SRI natively
+						// on module fetches (single fetch, no rewrite, source
+						// maps kept).
+						const importMapCapable =
+							hasHtmlFiles && isImportMapCapableBase(base);
+						const enforceDynamicImports =
+							!preloadDynamicChunks && !importMapCapable;
 						if (enforceDynamicImports) {
 							// ORDERING INVARIANT: this rewrite MUST run before
 							// any hashing AND before the runtime is injected

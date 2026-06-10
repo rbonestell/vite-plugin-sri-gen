@@ -2129,7 +2129,7 @@ describe("vite-plugin-sri-gen", () => {
 			expect(rewriteDynamicImports("")).toBe("");
 		});
 
-		it("rewrites import() in chunks and enables enforceDynamicImports in the runtime when preload injection is disabled", async () => {
+		it("rewrites import() in chunks and enables enforceDynamicImports in the runtime when preload injection is disabled (manifest-only bundle)", async () => {
 			const plugin = sri({
 				algorithm: "sha256",
 				preloadDynamicChunks: false,
@@ -2138,7 +2138,12 @@ describe("vite-plugin-sri-gen", () => {
 			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 
 			const bundle: Record<string, Chunk | Asset> = {
-				"index.html": { type: "asset", source: htmlDoc("") },
+				".vite/manifest.json": {
+					type: "asset",
+					source: JSON.stringify({
+						"src/main.ts": { file: "assets/entry.js" },
+					}),
+				},
 				"assets/entry.js": makeEntryChunk({
 					code: "const p = import('./lazy.js'); console.log(p);",
 					dynamicImports: ["src/lazy.ts"],
@@ -2243,7 +2248,12 @@ describe("vite-plugin-sri-gen", () => {
 			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 
 			const bundle: Record<string, Chunk | Asset> = {
-				"index.html": { type: "asset", source: htmlDoc("") },
+				".vite/manifest.json": {
+					type: "asset",
+					source: JSON.stringify({
+						"src/main.ts": { file: "assets/entry.js" },
+					}),
+				},
 				"assets/entry.js": makeEntryChunk({
 					code: "const a = import('./outer.js');",
 				}),
@@ -2281,7 +2291,12 @@ describe("vite-plugin-sri-gen", () => {
 			lazy.map = { version: 3, sources: ["lazy.ts"], mappings: "AAAA" };
 
 			const bundle: Record<string, Chunk | Asset> = {
-				"index.html": { type: "asset", source: htmlDoc("") },
+				".vite/manifest.json": {
+					type: "asset",
+					source: JSON.stringify({
+						"src/main.ts": { file: "assets/entry.js" },
+					}),
+				},
 				"assets/entry.js": entry,
 				"assets/lazy.js": lazy,
 			} as any;
@@ -2301,8 +2316,13 @@ describe("vite-plugin-sri-gen", () => {
 			plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 
 			const bundle: Record<string, Chunk | Asset> = {
-				"index.html": { type: "asset", source: htmlDoc("") },
-				"about.html": { type: "asset", source: htmlDoc("") },
+				".vite/manifest.json": {
+					type: "asset",
+					source: JSON.stringify({
+						"src/a.ts": { file: "assets/entry-a.js" },
+						"src/b.ts": { file: "assets/entry-b.js" },
+					}),
+				},
 				"assets/entry-a.js": makeEntryChunk({
 					fileName: "assets/entry-a.js",
 					code: "const a = import('./shared.js');",
@@ -2342,6 +2362,10 @@ describe("vite-plugin-sri-gen", () => {
 			expect(out).not.toContain("__sriImport");
 		});
 
+		// NOTE: with HTML in the bundle the import map subsumes JS-level
+		// enforcement, so no rewrite occurs here — the round-trip still
+		// verifies that the HTML integrity attribute matches the final
+		// (runtime-prepended) entry chunk bytes.
 		it("entry chunk hash reflects post-rewrite, post-runtime bytes (round-trip)", async () => {
 			const plugin = sri({
 				algorithm: "sha256",
