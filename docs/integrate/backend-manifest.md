@@ -92,5 +92,5 @@ Only JS and CSS files are hashed, matching what the plugin hashes everywhere els
 :::
 
 ::: warning Manifest parse failure
-If the manifest file cannot be parsed as JSON, the plugin logs a warning and leaves the file unchanged. The rest of the build continues normally.
+For the standard manifest paths (`.vite/manifest.json` and `manifest.json`), a JSON parse failure is logged as a warning and the file is left unchanged. Custom `*manifest.json` filenames that fail to parse are silently skipped — they may be unrelated assets such as PWA Web App manifests. Either way, the rest of the build continues normally.
 :::

@@ -6,7 +6,7 @@ Because the runtime is bundled code injected directly into your entry chunk — 
 
 ## Patched DOM Methods
 
-The runtime installs patches on four DOM methods:
+The runtime installs patches on five DOM methods:
 
 | Method | Prototype |
 | --- | --- |
