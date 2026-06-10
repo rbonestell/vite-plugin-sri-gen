@@ -158,9 +158,29 @@ sri({
 
 ### Lazy-loaded chunks and dynamic tags
 
-- If `preloadDynamicChunks` is enabled (default), the plugin scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` for them into emitted HTML, honoring Vite `base` and `crossorigin`. Browser-native SRI then validates each lazy chunk via its preload entry.
-- If `preloadDynamicChunks` is disabled (preserving on-demand network behavior for lazy chunks), the plugin instead enforces SRI at the JavaScript layer: every dynamic `import(...)` call site in the bundle is rewritten to a runtime helper that fetches the chunk, verifies its hash against the build-time integrity using `crypto.subtle`, and only then performs the native import. A mismatch throws and aborts module loading. This requires `runtimePatchDynamicLinks` (default on), a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) for `crypto.subtle` (HTTPS or localhost), and matching CORS configuration on the server hosting the chunks. The helper performs a separate verification fetch in addition to the browser's own module fetch — keep `Cache-Control: immutable` (or equivalent) on hashed chunk filenames to avoid a true second network round-trip. Source maps for chunks whose `import()` call sites are rewritten are dropped (the rewrite shifts byte offsets); the original source maps are preserved for any chunk that does not contain a dynamic import.
+- Whenever the build emits HTML (and `base` is root-relative or an absolute URL), the plugin injects a `<script type="importmap">` into each HTML file with an [`integrity`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap#integrity_metadata_map) object covering every emitted JS module. Browsers with import map integrity support (Chrome 127+, Firefox 138+, Safari 18.4+) enforce SRI natively on **both static and dynamic** module imports — including statically re-exported facade chunks that `modulepreload` discovery does not reach. Older browsers ignore the `integrity` key (progressive enhancement, the same model as SRI attributes generally). If your HTML already declares an import map, the integrity entries are merged into it; your own entries win on conflict. See [Import Map Integrity](#import-map-integrity).
+- If `preloadDynamicChunks` is enabled (default), the plugin additionally scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` for them into emitted HTML, honoring Vite `base` and `crossorigin`. Browser-native SRI then validates each lazy chunk via its preload entry (and preloading changes network timing: lazy chunks are fetched eagerly).
+- If `preloadDynamicChunks` is disabled and the import map **cannot** be emitted (no HTML in the bundle — e.g. backend-owned HTML consuming `manifest.json` — or a relative `base` like `'./'`), the plugin falls back to enforcing SRI at the JavaScript layer: every dynamic `import(...)` call site in the bundle is rewritten to a runtime helper that fetches the chunk, verifies its hash against the build-time integrity using `crypto.subtle`, and only then performs the native import. A mismatch throws and aborts module loading. This fallback requires `runtimePatchDynamicLinks` (default on), a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) for `crypto.subtle` (HTTPS or localhost), and matching CORS configuration on the server hosting the chunks. The helper performs a separate verification fetch in addition to the browser's own module fetch — keep `Cache-Control: immutable` (or equivalent) on hashed chunk filenames to avoid a true second network round-trip. Source maps for chunks whose `import()` call sites are rewritten are dropped (the rewrite shifts byte offsets). Builds covered by the import map have none of these constraints.
 - If `runtimePatchDynamicLinks` is enabled (default), a tiny runtime is prepended to entry chunks. It sets `integrity` (and `crossorigin` if configured) on dynamically created `<script>` and `<link>` elements for eligible resources (scripts, stylesheets, modulepreload, or preload as=script/style/font) before the network request happens. This is bundled code (not inline) and is CSP-safe.
+
+## Import Map Integrity
+
+When the build emits HTML, SRI for module chunks is declared in an injected import map:
+
+```html
+<script type="importmap">
+{"integrity":{"/assets/index-B3sb0LQp.js":"sha384-…","/assets/chunk-Cab12xJ4.js":"sha384-…"}}
+</script>
+```
+
+Supporting browsers (Chrome 127+, Firefox 138+, Safari 18.4+) apply the integrity metadata to every matching module fetch — static imports, dynamic `import()`, and module preloads alike — and refuse to execute a module whose bytes do not match.
+
+Notes:
+
+- **CSP:** the import map is necessarily an inline script (the HTML spec forbids `src` on import maps). Strict `script-src` policies without `'unsafe-inline'` must allow it via a nonce (server-side templating) or a hash — note the hash changes every build, since the map contains the chunk hashes.
+- **Workers:** import maps do not apply inside Web Workers or Service Workers; module chunks loaded there are not covered (the JS-runtime fallback does not cover them either).
+- **Relative `base`:** with `base: './'` (or `''`/`'../…'`), import map keys cannot be expressed portably (keys resolve against each document's URL), so injection is skipped and the JS-runtime fallback remains active for `preloadDynamicChunks: false` builds.
+- **Older browsers:** Chrome < 127, Firefox < 138, and Safari < 18.4 parse the map but ignore `integrity` — module loads proceed unverified there, exactly as HTML `integrity` attributes behave on browsers without SRI support.
 
 ## Runtime Patching
 
