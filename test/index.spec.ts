@@ -175,7 +175,7 @@ describe("vite-plugin-sri-gen", () => {
 			expect(out).toContain('crossorigin="anonymous"');
 		});
 
-		it("overwrites existing integrity in emitted HTML", async () => {
+		it("preserves existing integrity in emitted HTML", async () => {
 			const plugin = sri({ algorithm: "sha256" }) as any;
 			const html = `<!doctype html><html><head>
         <script src="/a.js" integrity="sha256-abc"></script>
@@ -187,8 +187,9 @@ describe("vite-plugin-sri-gen", () => {
 
 			await plugin.generateBundle.handler({}, bundle);
 			const out = String(bundle["index.html"].source);
-			// Should calculate fresh integrity, not preserve existing
-			expect(out).toContain(
+			// Hand-written integrity values are never overwritten
+			expect(out).toContain('integrity="sha256-abc"');
+			expect(out).not.toContain(
 				'integrity="sha256-CihokcEcBW4atb/CW/XWsvWwbTjqwQlE9nj9ii5ww5M="'
 			);
 		});

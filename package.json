@@ -75,6 +75,11 @@
 	"peerDependencies": {
 		"vite": ">=4.0.0"
 	},
+	"overrides": {
+		"vitepress": {
+			"vite": "^6.4.2"
+		}
+	},
 	"dependencies": {
 		"parse5": "^8.0.0"
 	},

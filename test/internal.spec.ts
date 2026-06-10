@@ -614,17 +614,21 @@ describe("Internal Utility Functions", () => {
 			expect(getAttrValue(element, "crossorigin")).toBe("anonymous");
 		});
 
-		it("overwrites elements with existing integrity", async () => {
+		it("preserves existing integrity attributes and leaves the element untouched", async () => {
 			const element = createTestElement("script", [
 				{ name: "src", value: "/foo.js" },
-				{ name: "integrity", value: "existing" },
+				{ name: "integrity", value: "sha256-pinnedByHand" },
 			]);
 			const bundle = mockBundle({ "foo.js": "console.log('test')" });
 
-			await processElement(element, bundle, "sha256");
+			await processElement(element, bundle, "sha256", "anonymous");
 
-			// Should calculate fresh integrity, not preserve existing
-			expect(getAttrValue(element, "integrity")).toMatch(/^sha256-/);
+			// Hand-written integrity wins; the element is skipped entirely,
+			// so crossorigin is not added either (matches the runtime guard).
+			expect(getAttrValue(element, "integrity")).toBe(
+				"sha256-pinnedByHand"
+			);
+			expect(getAttrValue(element, "crossorigin")).toBeUndefined();
 		});
 
 		it("handles missing resources gracefully", async () => {
@@ -751,6 +755,27 @@ describe("Internal Utility Functions", () => {
 			});
 
 			expect(result).toContain('crossorigin="anonymous"');
+		});
+
+		it("preserves hand-written integrity while hashing sibling tags", async () => {
+			const html = `<!DOCTYPE html><html><head>
+				<script src="/pinned.js" integrity="sha384-pinnedByHand"></script>
+				<script src="/fresh.js"></script>
+			</head><body></body></html>`;
+			const bundle = mockBundle({
+				"pinned.js": "console.log('pinned')",
+				"fresh.js": "console.log('fresh')",
+			});
+
+			const result = await addSriToHtml(html, bundle, console, {
+				algorithm: "sha384",
+			});
+
+			expect(result).toContain('integrity="sha384-pinnedByHand"');
+			// The sibling without an integrity attribute still gets hashed
+			expect(
+				(result.match(/integrity="sha384-/g) || []).length
+			).toBe(2);
 		});
 	});
 });
@@ -2753,7 +2778,7 @@ describe("Additional Edge Cases and Error Paths", () => {
 			expect(localGetAttrValue(element, "integrity")).toBeUndefined();
 		});
 
-		it("overwrites element with existing integrity", async () => {
+		it("preserves element with existing integrity", async () => {
 			const element = localCreateTestElement("script", [
 				{ name: "src", value: "/test.js" },
 				{ name: "integrity", value: "existing-integrity" },
@@ -2762,8 +2787,10 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 			await processElement(element, bundle, "sha256");
 
-			// Should calculate fresh integrity, not preserve existing
-			expect(localGetAttrValue(element, "integrity")).toMatch(/^sha256-/);
+			// Hand-written integrity values are never overwritten
+			expect(localGetAttrValue(element, "integrity")).toBe(
+				"existing-integrity"
+			);
 		});
 
 		it("handles resource loading failure", async () => {

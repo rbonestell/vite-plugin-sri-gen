@@ -51,9 +51,6 @@ Vite and modern Node tooling are native ESM-first. Dropping CommonJS simplifies 
 
 ## Does the plugin overwrite `integrity` attributes I wrote by hand?
 
-It depends on where those attributes appear:
+No. An element that already carries an `integrity` attribute is left completely untouched — the plugin does not recompute the hash or add `crossorigin` to it. The same rule applies everywhere: static HTML tags, manifest entries, and runtime-patched elements all preserve existing values.
 
-- **Static HTML tags** — yes. For `<script src>` and `<link>` tags present in your HTML source, the plugin recomputes integrity from the built output and writes the result into the attribute. Any value you wrote by hand is replaced.
-- **Manifest entries and runtime-patched elements** — no. Integrity values in `manifest.json` are computed from built chunks, and the runtime patching system operates at request time; neither path touches hand-written attributes in source HTML.
-
-If you need to exclude a specific element so its existing attributes survive the build unchanged, add it to `skipResources`. Elements that match a skip pattern are not processed at all — they keep every attribute exactly as written. See [Skipping Resources](/configure/skipping-resources) for the full pattern reference.
+Keep in mind that a hand-written hash is your responsibility: if the file's content changes, browsers will refuse to load it until you update the value. To exclude an element from SRI processing entirely (including the import map), use `skipResources` — see [Skipping Resources](/configure/skipping-resources).

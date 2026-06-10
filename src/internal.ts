@@ -680,6 +680,9 @@ export async function processElement(
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
+	// Preserve hand-written integrity: leave the element untouched
+	if (getAttrValue(element, "integrity")) return;
+
 	// Determine the URL attribute name (src or href)
 	const attrName = getUrlAttrName(element);
 	if (!attrName) return;

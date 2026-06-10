@@ -51,22 +51,6 @@ See [Import Map Integrity](/integrate/import-map) for the full browser support t
 
 The JS rewrite path requires a secure context (`crypto.subtle`), CORS headers on chunk responses, and doubles each chunk fetch — serve hashed chunks with `Cache-Control: immutable` to keep the second fetch out of the network. These constraints don't apply to builds fully covered by the import map or modulepreload paths. See [Coverage Strategies](/learn/coverage-strategies) for the decision tree.
 
-## Hand-Written Integrity Attributes
-
-**What:** If you manually write an `integrity` attribute on a `<script src>` or `<link>` tag in your HTML source, the plugin overwrites it with the hash recomputed from the built output. Your pinned value does not survive the build.
-
-**Why:** The plugin processes every eligible element it finds in emitted HTML. It does not distinguish between attributes the developer wrote and ones it added in a previous pass. The recomputed hash is always the authoritative one for that build.
-
-**Workaround:** To keep an element's existing `integrity` value untouched, exclude it via `skipResources`. Elements that match a skip pattern are not processed at all — they retain every attribute exactly as they appear in source.
-
-```ts
-sri({
-  skipResources: ['#my-pinned-script', 'https://cdn.example.com/specific-file.js'],
-})
-```
-
-See [Skipping Resources](/configure/skipping-resources) for the full pattern reference.
-
 ## Dev Server
 
 The plugin is intentionally disabled during `vite dev`. There is no integrity enforcement, no import map injection, and no runtime patching in development. This is by design, not a configuration issue.
