@@ -3,11 +3,11 @@ layout: home
 
 hero:
   name: vite-plugin-sri-gen
-  text: SRI hashes at build time
+  text: Autogenerate SRI hashes at build time
   tagline: Autogenerate Subresource Integrity hashes for every script, stylesheet, and module chunk your Vite build emits.
   image:
-    src: /bolt.svg
-    alt: vite-plugin-sri-gen lightning bolt
+    src: /logo.png
+    alt: vite-plugin-sri-gen logo
   actions:
     - theme: brand
       text: Get Started

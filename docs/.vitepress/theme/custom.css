@@ -19,13 +19,8 @@
 		#7c3aed 72%,
 		#9333ea 100%
 	);
-	--vp-home-hero-image-background-image: radial-gradient(
-		closest-side,
-		rgba(139, 92, 246, 0.5) 0%,
-		rgba(251, 191, 36, 0.18) 55%,
-		transparent 100%
-	);
-	--vp-home-hero-image-filter: blur(64px);
+	--vp-home-hero-image-background-image: none;
+	--vp-home-hero-image-filter: none;
 
 	--vp-button-brand-bg: #7c3aed;
 	--vp-button-brand-border: #6d28d9;
@@ -82,13 +77,8 @@
 		#a78bfa 100%
 	);
 
-	--vp-home-hero-image-background-image: radial-gradient(
-		closest-side,
-		rgba(168, 85, 247, 0.55) 0%,
-		rgba(251, 191, 36, 0.15) 60%,
-		transparent 100%
-	);
-	--vp-home-hero-image-filter: blur(72px);
+	--vp-home-hero-image-background-image: none;
+	--vp-home-hero-image-filter: none;
 
 	--vp-button-brand-bg: #7c3aed;
 	--vp-button-brand-border: #6d28d9;
