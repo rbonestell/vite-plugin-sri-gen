@@ -43,4 +43,4 @@ Import maps are necessarily inline — the HTML spec does not allow a `src` attr
 
 - **`skipResources` patterns** — resources excluded via `skipResources` are also excluded from the import map. The opt-out applies to native module-fetch enforcement as well.
 
-- **`<base href>` in HTML** — if your HTML contains a `<base href="https://…">` pointing to an absolute URL, the browser resolves import map keys against that base origin rather than the page origin. Root-relative keys like `/assets/index.js` may no longer match the URLs modules are actually fetched from. The plugin detects this and logs a build warning when it finds an absolute-URL `<base>` element in an HTML file that is receiving an import map. Review the warning and verify that your import map keys resolve correctly against the `<base>` origin.
+- **`<base href>` in HTML** — if your HTML contains a `<base href="https://…">` pointing to an absolute URL, the browser resolves import map keys against that base origin rather than the page origin. Root-relative keys like `/assets/index.js` may no longer match the URLs modules are actually fetched from. The plugin logs a build warning when it detects this.

@@ -46,8 +46,6 @@ export default defineConfig({
 
 Every emitted HTML file — `index.html`, `about/index.html`, and `admin/index.html` — receives SRI attributes. Each page's static tags are hashed independently; the import map and any injected modulepreload links reflect the chunks that page actually loads.
 
-No additional configuration is needed for MPA support. The `generateBundle` hook processes all `.html` assets it finds in the bundle output.
-
 ## Further Reading
 
 Lazy chunks and dynamically inserted tags require separate coverage strategies. See [Coverage Strategies](/learn/coverage-strategies) for how modulepreload injection, the import map, and runtime patching layer together to cover the full module graph.

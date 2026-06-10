@@ -33,12 +33,12 @@ Both fields are appended after the existing Vite-emitted keys. Example manifest 
     "isEntry": true,
     "css": ["assets/main-ABC.css"],
     "imports": ["_shared-GHI.js"],
-    "integrity": "sha384-...",
-    "cssIntegrity": ["sha384-..."]
+    "integrity": "sha384-…",
+    "cssIntegrity": ["sha384-…"]
   },
   "_shared-GHI.js": {
     "file": "_shared-GHI.js",
-    "integrity": "sha384-..."
+    "integrity": "sha384-…"
   }
 }
 ```
@@ -59,29 +59,48 @@ Backends resolve chunk dependencies by walking the `imports` and `dynamicImports
 A simplified Node/Express example:
 
 ```js
-import manifest from './dist/.vite/manifest.json' assert { type: 'json' }
+import { readFileSync } from 'node:fs'
+
+const manifest = JSON.parse(readFileSync('./dist/.vite/manifest.json', 'utf8'))
 
 function renderPage(entryKey) {
   const entry = manifest[entryKey]
+  const tags = []
 
-  // Render the entry script tag
-  const scriptTag = entry.integrity
-    ? `<script type="module" src="/${entry.file}" integrity="${entry.integrity}" crossorigin="anonymous"></script>`
-    : `<script type="module" src="/${entry.file}"></script>`
+  // Emit modulepreload links for statically imported chunks so the browser
+  // fetches and verifies them in parallel with the entry script.
+  for (const chunkKey of entry.imports ?? []) {
+    const chunk = manifest[chunkKey]
+    if (!chunk) continue
+    tags.push(
+      chunk.integrity
+        ? `<link rel="modulepreload" href="/${chunk.file}" integrity="${chunk.integrity}" crossorigin="anonymous">`
+        : `<link rel="modulepreload" href="/${chunk.file}">`
+    )
+  }
 
   // Render CSS link tags
-  const cssTags = (entry.css ?? []).map((href, i) => {
+  for (const [i, href] of (entry.css ?? []).entries()) {
     const hash = entry.cssIntegrity?.[i]
-    return hash
-      ? `<link rel="stylesheet" href="/${href}" integrity="${hash}" crossorigin="anonymous">`
-      : `<link rel="stylesheet" href="/${href}">`
-  }).join('\n')
+    tags.push(
+      hash
+        ? `<link rel="stylesheet" href="/${href}" integrity="${hash}" crossorigin="anonymous">`
+        : `<link rel="stylesheet" href="/${href}">`
+    )
+  }
 
-  return `${cssTags}\n${scriptTag}`
+  // Render the entry script tag
+  tags.push(
+    entry.integrity
+      ? `<script type="module" src="/${entry.file}" integrity="${entry.integrity}" crossorigin="anonymous"></script>`
+      : `<script type="module" src="/${entry.file}"></script>`
+  )
+
+  return tags.join('\n')
 }
 ```
 
-Chunks listed in `imports` (static dependencies) and `dynamicImports` (lazy chunks) can be resolved the same way — look up each value as a key in the manifest and read its `integrity`.
+`dynamicImports` (lazy chunks) can be resolved the same way — look up each value as a key in the manifest and read its `integrity`. For deeply nested dependency trees, walk `imports` recursively, tracking visited keys to avoid cycles.
 
 ::: tip
 Existing `integrity` or `cssIntegrity` values on manifest entries are preserved and never overwritten. If you pre-populate these fields in a custom build step, the plugin leaves them alone.

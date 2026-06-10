@@ -24,7 +24,7 @@ Any `.html` asset emitted during the build receives the full treatment: static t
 
 [Vike](https://vike.dev/) (formerly vite-plugin-ssr) is a common example. When Vike's prerendering step is active, it emits the prerendered pages as HTML assets into the bundle, and the plugin picks them up automatically.
 
-## The Warning You'll See
+## SSR Build Warning
 
 When a build is detected as SSR (via `build.ssr`) and no `.html` files are found in the bundle output, the plugin logs:
 
