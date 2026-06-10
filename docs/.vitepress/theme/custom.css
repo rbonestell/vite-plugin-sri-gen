@@ -1,0 +1,173 @@
+/* Voltage palette — derived from the repo header artwork */
+
+/**
+ * Light-mode brand tokens (default :root)
+ * The dark-mode overrides below are the canonical "Voltage" look.
+ * Light mode remaps to saturated variants for legibility.
+ */
+:root {
+	--vp-c-brand-1: #6d28d9;
+	--vp-c-brand-2: #7c3aed;
+	--vp-c-brand-3: #8b5cf6;
+	--vp-c-brand-soft: rgba(109, 40, 217, 0.12);
+
+	--vp-home-hero-name-color: transparent;
+	--vp-home-hero-name-background: linear-gradient(
+		118deg,
+		#d97706 0%,
+		#ea580c 38%,
+		#7c3aed 72%,
+		#9333ea 100%
+	);
+	--vp-home-hero-image-background-image: radial-gradient(
+		closest-side,
+		rgba(139, 92, 246, 0.5) 0%,
+		rgba(251, 191, 36, 0.18) 55%,
+		transparent 100%
+	);
+	--vp-home-hero-image-filter: blur(64px);
+
+	--vp-button-brand-bg: #7c3aed;
+	--vp-button-brand-border: #6d28d9;
+	--vp-button-brand-text: #ffffff;
+	--vp-button-brand-hover-bg: #8b5cf6;
+	--vp-button-brand-hover-border: #7c3aed;
+	--vp-button-brand-active-bg: #6d28d9;
+}
+
+/**
+ * Dark mode — "Voltage" full expression
+ * Navy background, violet surfaces, amber code, lavender brand.
+ */
+.dark {
+	--vp-c-bg: #0e0c1d;
+	--vp-c-bg-alt: #16132a;
+	--vp-c-bg-soft: #16132a;
+	--vp-c-bg-elv: #1b1733;
+	--vp-c-bg-mute: #1b1733;
+
+	--vp-c-divider: rgba(167, 139, 250, 0.16);
+	--vp-c-divider-light: rgba(167, 139, 250, 0.08);
+
+	--vp-c-brand-1: #a78bfa;
+	--vp-c-brand-2: #8b5cf6;
+	--vp-c-brand-3: #7c3aed;
+	--vp-c-brand-soft: rgba(167, 139, 250, 0.14);
+
+	--vp-c-text-1: #e2e0f0;
+	--vp-c-text-2: #b8b4d8;
+	--vp-c-text-3: #8b87b0;
+
+	/* Amber inline code — matches the artwork's amber accent */
+	--vp-code-color: #fbbf24;
+	--vp-code-bg: rgba(251, 191, 36, 0.08);
+	--vp-code-block-bg: #0d0b1e;
+
+	/* Teal tip/success blocks — sparingly, per spec */
+	--vp-custom-block-tip-border: #2dd4bf;
+	--vp-custom-block-tip-text: #ccfbf1;
+	--vp-custom-block-tip-bg: rgba(45, 212, 191, 0.08);
+	--vp-custom-block-tip-code-bg: rgba(45, 212, 191, 0.12);
+
+	/* Warning block: amber tone */
+	--vp-custom-block-warning-border: #fbbf24;
+	--vp-custom-block-warning-text: #fef3c7;
+	--vp-custom-block-warning-bg: rgba(251, 191, 36, 0.08);
+
+	/* Hero gradient — richer amber→orange→violet in dark */
+	--vp-home-hero-name-background: linear-gradient(
+		118deg,
+		#fbbf24 0%,
+		#f97316 35%,
+		#c084fc 68%,
+		#a78bfa 100%
+	);
+
+	--vp-home-hero-image-background-image: radial-gradient(
+		closest-side,
+		rgba(168, 85, 247, 0.55) 0%,
+		rgba(251, 191, 36, 0.15) 60%,
+		transparent 100%
+	);
+	--vp-home-hero-image-filter: blur(72px);
+
+	--vp-button-brand-bg: #7c3aed;
+	--vp-button-brand-border: #6d28d9;
+	--vp-button-brand-text: #ffffff;
+	--vp-button-brand-hover-bg: #8b5cf6;
+	--vp-button-brand-hover-border: #7c3aed;
+	--vp-button-brand-active-bg: #6d28d9;
+
+	/* Nav / sidebar surface */
+	--vp-nav-bg-color: rgba(14, 12, 29, 0.9);
+	--vp-sidebar-bg-color: #0e0c1d;
+	--vp-local-nav-bg-color: #0e0c1d;
+}
+
+/* ─── Hero name: electric weight + tightened tracking ─────────────────────── */
+.VPHero .name {
+	font-weight: 800;
+	letter-spacing: -0.02em;
+	line-height: 1.05;
+}
+
+/* Hero tagline: airy tracking for contrast with the compressed name */
+.VPHero .tagline {
+	letter-spacing: 0.025em;
+}
+
+/* ─── Hero image: violet glow pulse ──────────────────────────────────────── */
+.VPHero .image-container {
+	position: relative;
+}
+
+/* ─── Feature cards: gradient border glow on hover ───────────────────────── */
+.VPFeature {
+	transition: border-color 0.28s ease, box-shadow 0.28s ease, transform 0.28s ease;
+	border: 1px solid transparent;
+	background-clip: padding-box;
+}
+
+.VPFeature:hover {
+	border-color: #a855f7;
+	box-shadow:
+		0 0 0 1px rgba(168, 85, 247, 0.3),
+		0 0 28px rgba(168, 85, 247, 0.22),
+		0 4px 24px rgba(124, 58, 237, 0.15);
+	transform: translateY(-2px);
+}
+
+/* Feature icon: teal tint on hover to echo the artwork's accent icons */
+.VPFeature:hover .icon {
+	filter: drop-shadow(0 0 6px rgba(45, 212, 191, 0.5));
+}
+
+/* ─── Navbar: slight violet border bottom ────────────────────────────────── */
+.dark .VPNav {
+	border-bottom-color: rgba(124, 58, 237, 0.25);
+}
+
+/* ─── Code blocks: subtle amber glow on inline code in dark mode ─────────── */
+.dark code:not(pre code) {
+	border-radius: 4px;
+	padding: 2px 6px;
+	font-weight: 500;
+}
+
+/* ─── Sidebar: active link amber accent ──────────────────────────────────── */
+.dark .VPSidebarItem.is-active > .item > .link > .text {
+	color: #a78bfa;
+}
+
+/* ─── Content links: violet underline ────────────────────────────────────── */
+.vp-doc a {
+	color: var(--vp-c-brand-1);
+	text-decoration-color: var(--vp-c-brand-soft);
+	text-underline-offset: 3px;
+	transition: color 0.2s, text-decoration-color 0.2s;
+}
+
+.vp-doc a:hover {
+	color: var(--vp-c-brand-3);
+	text-decoration-color: var(--vp-c-brand-1);
+}
