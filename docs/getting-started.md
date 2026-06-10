@@ -41,14 +41,12 @@ export default {
 
 See [Options](/configure/options) for the full reference, including `preloadDynamicChunks` and `runtimePatchDynamicLinks`.
 
-The package is ESM-only. Import it as `import sri from 'vite-plugin-sri-gen'`.
-
 ## What You Get
 
 Running `vite build` with this plugin produces HTML where every relevant tag carries a computed integrity hash:
 
 - **Scripts, stylesheets, and modulepreload links** already present in your HTML get `integrity` (and `crossorigin`, if configured) added automatically. See [Coverage Strategies](/learn/coverage-strategies).
-- **Import map integrity** — an injected `<script type="importmap">` declares hashes for every emitted JS module, giving Chrome 127+, Firefox 138+, and Safari 18+ native SRI enforcement over both static and dynamic module imports. See [Import Map Integrity](/integrate/import-map).
+- **import map integrity** — an injected `<script type="importmap">` declares hashes for every emitted JS module, giving supported modern browsers native SRI enforcement over both static and dynamic module imports. See [Import Map Integrity](/integrate/import-map).
 - **Modulepreload injection for lazy chunks** — the plugin scans Rollup output for dynamically imported chunks and injects `<link rel="modulepreload" integrity=...>` links into each HTML file, so lazy chunks are preloaded with verified hashes. See [Coverage Strategies](/learn/coverage-strategies).
 - **CSP-safe runtime patching of dynamic tags** — a tiny runtime prepended to entry chunks intercepts dynamically created `<script>` and `<link>` elements and adds the appropriate `integrity` and `crossorigin` attributes before the browser makes the request. See [Runtime Patching](/integrate/runtime-patching).
 - **Vite manifest augmentation** — when `build.manifest: true` is set, the plugin adds `integrity` and `cssIntegrity` fields to each manifest entry so backends that own HTML generation can attach integrity without re-hashing the files. See [Backend-Owned HTML (Manifest)](/integrate/backend-manifest).

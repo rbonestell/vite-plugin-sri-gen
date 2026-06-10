@@ -37,8 +37,7 @@ sequenceDiagram
 
     B->>C: GET /lib.js
     C-->>B: 200 OK (file bytes)
-    B->>B: Hash received bytes (sha384)
-    B->>B: Compare hash to integrity attribute
+    Note over B: Hash bytes, compare to integrity attribute
     alt Hashes match
         B->>B: Execute / apply resource
     else Hashes differ
@@ -46,7 +45,7 @@ sequenceDiagram
     end
 ```
 
-## The crossorigin Requirement
+## CORS and the `crossorigin` Attribute
 
 For SRI enforcement on cross-origin resources, two things must be in place:
 

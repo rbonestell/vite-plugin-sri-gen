@@ -26,7 +26,7 @@ Older browsers parse the map but ignore the `integrity` key; module loads procee
 
 If your HTML already includes a `<script type="importmap">`, the plugin merges its `integrity` entries into the existing map rather than injecting a second one. Your own entries win on any key collision.
 
-See [Import Map Integrity](/integrate/import-map) for CSP implications, Worker caveats, and behavior with `base: './'`.
+See [import map integrity](/integrate/import-map) for CSP implications, Worker caveats, and behavior with `base: './'`.
 
 ## Modulepreload Injection (`preloadDynamicChunks`)
 
@@ -54,12 +54,15 @@ The runtime patches `Element.prototype.setAttribute`, `Node.prototype.appendChil
 
 The runtime is bundled code injected into the chunk, not an inline script — it is CSP-safe without `'unsafe-inline'`. See [Runtime Patching](/integrate/runtime-patching) for full details.
 
-## JS Fallback: `import()` Rewriting
+## JS Fallback (`import()` Rewriting)
 
 This path activates only when **all three** of the following are true:
 
 1. `preloadDynamicChunks` is `false`
-2. The import map cannot cover every consumer of the bundle — which applies when there is no HTML in the bundle (backend-owned HTML reading `manifest.json`), when a manifest is emitted alongside HTML (the manifest consumer's server-rendered pages have no import map), or when `base` is relative (`'./'`, `''`, `'../…'`)
+2. The import map cannot cover every consumer of the bundle. This is true when:
+   - There is no HTML in the bundle (backend-owned HTML reading `manifest.json`)
+   - A manifest is emitted alongside HTML (the manifest consumer's server-rendered pages have no import map)
+   - `base` is relative (`'./'`, `''`, `'../…'`)
 3. `runtimePatchDynamicLinks` is `true` (required, as it installs the verifier function)
 
 In this scenario, every `import(...)` call site in the bundle is rewritten to `__sriImport(import.meta.url, ...)`. The injected `__sriImport` helper fetches the chunk, verifies its hash against the build-time integrity map using `crypto.subtle`, and only then performs the native `import()`. A hash mismatch throws and aborts module loading.
@@ -97,7 +100,7 @@ flowchart TD
 | Mechanism | What it covers | Browser support | Enabled by |
 | --- | --- | --- | --- |
 | Static tag SRI | `<script>`, `<link rel="stylesheet">`, `<link rel="modulepreload">` in HTML | All SRI-supporting browsers | Always on (HTML in bundle) |
-| Import map integrity | All module fetches — static, dynamic, and preloaded | Chrome 127+, Firefox 138+, Safari 18+ | HTML in bundle + root-relative/absolute `base` |
+| import map integrity | All module fetches — static, dynamic, and preloaded | Chrome 127+, Firefox 138+, Safari 18+ | HTML in bundle + root-relative/absolute `base` |
 | Modulepreload injection | Dynamically imported chunks (via preload + native SRI) | All SRI-supporting browsers | `preloadDynamicChunks: true` (default) |
 | Runtime patching | Dynamically created `<script>`/`<link>` elements | All browsers (JS-based) | `runtimePatchDynamicLinks: true` (default) |
 | JS `import()` rewriting | Dynamic `import()` call sites | All browsers with `crypto.subtle` (secure context) | Auto when `preloadDynamicChunks: false` + import map insufficient |

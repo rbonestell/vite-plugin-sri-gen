@@ -4,7 +4,7 @@
 
 The plugin registers as a `post`-order `generateBundle` hook — a single Rollup hook that fires after the full bundle has been assembled and all output files are determined. There is no `transformIndexHtml` hook; both SPA and MPA HTML files are handled the same way, by scanning the in-memory bundle for `.html` assets.
 
-Within `generateBundle`, processing runs in five ordered steps:
+Within `generateBundle`, processing runs in four ordered steps:
 
 ```mermaid
 flowchart TD
@@ -19,18 +19,22 @@ flowchart TD
     H --> I[Analyze dynamic import relationships]
     I --> J{HTML in bundle?}
     J -- yes --> K[Process HTML files:\n• Add integrity to existing tags\n• Inject modulepreload links\n• Inject import map\n• Update bundle assets]
-    J -- no --> L
-    K --> L{Manifest in bundle?}
+    J -- no --> L{Manifest in bundle?}
+    K --> L
     L -- yes --> M[Augment manifest\nwith integrity fields]
-    L -- no --> N
-    M --> N([Build complete])
+    L -- no --> N([Build complete])
+    M --> N
 ```
 
 **Step 1 — Integrity mappings.** Every `.js`, `.mjs`, and `.css` file in the bundle is hashed using Node's `crypto.createHash`. When `runtimePatchDynamicLinks` is enabled (the default), this runs in two passes: non-entry chunks are hashed first, then the runtime is injected into entry chunks, then entry chunks are hashed — so the entry chunk hash covers the injected runtime code.
 
 **Step 2 — Dynamic import analysis.** The plugin reads Rollup's `chunk.dynamicImports` metadata to build a set of files that are lazily imported. This drives both modulepreload injection and the JS-level import rewriting path.
 
-**Step 3 — HTML processing.** For each `.html` asset in the bundle the plugin: (a) adds `integrity` (and optionally `crossorigin`) to existing `<script>`, `<link rel="stylesheet">`, and `<link rel="modulepreload">` tags; (b) injects `<link rel="modulepreload" integrity=...>` for any lazy chunks discovered in step 2 (when `preloadDynamicChunks` is enabled); (c) injects or merges a `<script type="importmap">` carrying an `integrity` object for every emitted JS module.
+**Step 3 — HTML processing.** For each `.html` asset in the bundle, the plugin performs three operations in order:
+
+- Adds `integrity` (and optionally `crossorigin`) to existing `<script>`, `<link rel="stylesheet">`, and `<link rel="modulepreload">` tags.
+- Injects `<link rel="modulepreload" integrity=...>` for each lazy chunk discovered in step 2 (when `preloadDynamicChunks` is enabled).
+- Injects or merges a `<script type="importmap">` carrying an `integrity` object for every emitted JS module.
 
 **Step 4 — Manifest augmentation.** If Vite emitted a build manifest (`build.manifest: true`), the plugin adds `integrity` and `cssIntegrity` fields to each manifest entry. This step runs even when no HTML was emitted, making it the primary path for backend-owned HTML generation.
 
