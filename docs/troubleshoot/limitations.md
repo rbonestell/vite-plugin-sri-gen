@@ -16,7 +16,7 @@ Most Vite apps are fully covered with the default configuration, but a few scena
 
 **Why:** Import maps do not apply inside worker contexts — the browser runs them in a separate module graph with no access to the page's import map. The JS `import()` fallback path is also scoped to the main thread and does not run inside workers.
 
-**Workaround:** There is no automatic workaround. If your worker loads a chunk from the same origin, you can manually add an integrity check via the [Trusted Types API](https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API) or by fetching the script as text, verifying the hash in worker code, and constructing an object URL.
+**Workaround:** There is no plugin-level workaround. Fetching the script as text and verifying the hash manually in worker code before constructing an object URL is one approach, but there is no established pattern with supporting guidance to link to.
 
 See [Import Map Integrity](/integrate/import-map) for additional context on this constraint.
 
@@ -31,8 +31,8 @@ See [Import Map Integrity](/integrate/import-map) for additional context on this
 - `<link rel="modulepreload" integrity=...>` injected by `preloadDynamicChunks` (the default) provides native SRI coverage for lazy chunks on older browsers.
 - Runtime patching (`runtimePatchDynamicLinks`) enforces integrity on dynamically created `<script>` and `<link>` elements in all browsers via JavaScript.
 
-::: tip Keep the defaults for broad coverage
-With `preloadDynamicChunks: true` and `runtimePatchDynamicLinks: true` (both defaults), older browsers receive meaningful SRI coverage through modulepreload and runtime patching even without import map integrity support.
+::: tip Broad coverage without import map integrity
+Keeping `preloadDynamicChunks: true` and `runtimePatchDynamicLinks: true` (both defaults) gives older browsers meaningful SRI coverage through modulepreload and runtime patching even without import map integrity support.
 :::
 
 See [Import Map Integrity](/integrate/import-map) for the full browser support table and progressive-enhancement model.
@@ -47,15 +47,9 @@ See [Import Map Integrity](/integrate/import-map) for the full browser support t
 
 ## JS Fallback Constraints
 
-**What:** The JS `import()` rewriting path has three constraints that do not apply to other coverage strategies.
+**What:** The JS `import()` rewriting path has constraints that do not apply to other coverage strategies.
 
-**Why and workaround for each:**
-
-- **Secure context required.** `crypto.subtle` is only available in [secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) (HTTPS or `localhost`). Serving your app over plain HTTP in production means the verifier cannot run.
-- **CORS must be configured.** The verifier fetches each chunk before passing it to the native `import()`. Your server must respond with `Access-Control-Allow-Origin` headers covering the page's origin, or the preflight will be rejected.
-- **Double fetch per chunk.** Each chunk is fetched once by the verifier and once by the browser's module loader. Use `Cache-Control: immutable` on content-hashed chunk filenames (Vite's default output naming already produces content hashes) so the second request is served from the browser cache rather than making a real network round-trip.
-
-These constraints don't apply to builds fully covered by the import map or modulepreload paths. See [Coverage Strategies](/learn/coverage-strategies) for the decision tree.
+The JS rewrite path requires a secure context (`crypto.subtle`), CORS headers on chunk responses, and doubles each chunk fetch — serve hashed chunks with `Cache-Control: immutable` to keep the second fetch out of the network. These constraints don't apply to builds fully covered by the import map or modulepreload paths. See [Coverage Strategies](/learn/coverage-strategies) for the decision tree.
 
 ## Hand-Written Integrity Attributes
 
