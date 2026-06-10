@@ -13,6 +13,14 @@ export default withMermaid(
 		lastUpdated: true,
 		head: [
 			["link", { rel: "icon", type: "image/svg+xml", href: "/vite-plugin-sri-gen/bolt.svg" }],
+			[
+				"script",
+				{
+					"data-goatcounter": "https://vite-plugin-sri-gen.goatcounter.com/count",
+					async: "",
+					src: "//gc.zgo.at/count.js",
+				},
+			],
 		],
 		themeConfig: {
 			logo: "/bolt.svg",
