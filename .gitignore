@@ -3,9 +3,10 @@
 .claude/*
 .serena/*
 .kilocode/*
+.superpowers/
+docs/superpowers/
 
 ### Misc ###
-docs/
 temp/
 
 ### Node ###
