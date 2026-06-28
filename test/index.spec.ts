@@ -2590,7 +2590,15 @@ describe("import map SRI", () => {
 		await plugin.generateBundle.handler({}, bundle as any);
 		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
 		expect(entryCode).toContain("import('./lazy.js')");
-		expect(entryCode).not.toContain("__sriImport(import.meta.url");
+		// Assert the actual import() call site was NOT rewritten. Match the
+		// concrete rewrite output (`__sriImport(import.meta.url, './lazy.js'`)
+		// rather than the bare `__sriImport(import.meta.url` prefix: that prefix
+		// also occurs verbatim in an explanatory comment inside the serialized
+		// installSriRuntime body, which some transforms (Vite 8 / Rolldown's oxc)
+		// preserve when vitest loads the source.
+		expect(entryCode).not.toContain(
+			"__sriImport(import.meta.url, './lazy.js'"
+		);
 		expect(entryCode).toContain("enforceDynamicImports: false");
 		expect(entryCode).toContain("installSriRuntime"); // DOM patching stays
 	});

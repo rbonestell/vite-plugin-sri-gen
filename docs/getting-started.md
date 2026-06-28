@@ -68,7 +68,7 @@ Additional requirements:
 
 - **Node ≥ 18** — the plugin uses the global `fetch` API introduced in Node 18.
 - **ESM-only** — import with `import sri from 'vite-plugin-sri-gen'`. CommonJS `require()` is not supported.
-- **Vite ≥ 4** — declared as a peer dependency; Vite 5 and 6 are also supported.
+- **Vite ≥ 4** — declared as a peer dependency; Vite 5, 6, 7, and 8 (Rolldown) are all supported.
 - **Build-only** — SRI is intentionally disabled during `vite dev`. See [Dev Mode](/troubleshoot/dev-mode) for why.
 
 ## Next Steps
