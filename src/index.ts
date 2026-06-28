@@ -1,5 +1,11 @@
-import type { NormalizedOutputOptions, OutputBundle } from "rollup";
-import type { Plugin, PluginOption, ResolvedConfig } from "vite";
+import type { Plugin, PluginOption, ResolvedConfig, Rollup } from "vite";
+
+// Vite re-exports the Rollup bundle types under its `Rollup` namespace. Sourcing
+// them from Vite (rather than directly from "rollup") keeps the plugin aligned
+// with whichever bundler Vite uses — Rollup on Vite ≤7, Rolldown on Vite 8 — so
+// the generateBundle signature stays compatible across the full peer range.
+type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
+type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
 	createLogger,

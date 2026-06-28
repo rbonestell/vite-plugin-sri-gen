@@ -2,8 +2,14 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { DefaultTreeAdapterTypes, Token } from "parse5";
 import { parse, serialize } from "parse5";
-import type { OutputAsset, OutputBundle, OutputChunk } from "rollup";
+import type { Rollup } from "vite";
 import type { IRuntimeDependencies } from "./dom-abstraction";
+
+// Rollup bundle types, sourced via Vite's `Rollup` namespace so they track the
+// active bundler (Rollup on Vite ≤7, Rolldown on Vite 8). See src/index.ts.
+type OutputAsset = Rollup.OutputAsset;
+type OutputBundle = Rollup.OutputBundle;
+type OutputChunk = Rollup.OutputChunk;
 import { defaultDependencies } from "./dom-abstraction";
 
 // Use public parse5 types instead of deep import
