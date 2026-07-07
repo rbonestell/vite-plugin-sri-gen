@@ -1355,6 +1355,104 @@ describe("Processing Classes", () => {
 			expect(result.size).toBe(1);
 			expect(result.has("assets/chunk-abc123.js")).toBe(true);
 		});
+
+		describe("redundantImportMapChunks", () => {
+			const analyzer = new DynamicImportAnalyzer(createMockBundleLogger());
+
+			function chunk(
+				fileName: string,
+				extra: Record<string, unknown> = {}
+			): any {
+				return {
+					type: "chunk",
+					fileName,
+					code: "",
+					imports: [],
+					dynamicImports: [],
+					modules: {},
+					name: fileName,
+					facadeModuleId: null,
+					...extra,
+				};
+			}
+
+			it("marks a lone entry (imported by nobody) as redundant", () => {
+				const bundle: any = { "assets/entry.js": chunk("assets/entry.js") };
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a statically-imported chunk out of the redundant set (module-id form)", () => {
+				const bundle: any = {
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["src/vendor.ts"],
+					}),
+					"assets/vendor.js": chunk("assets/vendor.js", {
+						modules: { "src/vendor.ts": {} },
+						facadeModuleId: "src/vendor.ts",
+					}),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a statically-imported chunk out of the redundant set (bundle-key form)", () => {
+				const bundle: any = {
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["assets/vendor.js"],
+					}),
+					"assets/vendor.js": chunk("assets/vendor.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a dynamically-imported chunk out of the redundant set", () => {
+				const bundle: any = {
+					"assets/entry.js": chunk("assets/entry.js", {
+						dynamicImports: ["src/lazy.ts"],
+					}),
+					"assets/lazy.js": chunk("assets/lazy.js", {
+						modules: { "src/lazy.ts": {} },
+						facadeModuleId: "src/lazy.ts",
+					}),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a shared entry that another entry statically imports (MPA guard)", () => {
+				const bundle: any = {
+					"assets/main.js": chunk("assets/main.js", {
+						isEntry: true,
+						imports: ["src/shared.ts"],
+					}),
+					"assets/shared.js": chunk("assets/shared.js", {
+						isEntry: true,
+						modules: { "src/shared.ts": {} },
+						facadeModuleId: "src/shared.ts",
+					}),
+				};
+				// main is imported by nobody -> redundant; shared is imported by main -> kept.
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/main.js"])
+				);
+			});
+
+			it("ignores non-chunk assets", () => {
+				const bundle: any = {
+					"assets/entry.js": chunk("assets/entry.js"),
+					"index.html": { type: "asset", source: "" },
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+		});
 	});
 
 	describe("HtmlProcessor", () => {

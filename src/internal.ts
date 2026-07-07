@@ -1370,6 +1370,45 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
+	 * Filenames of chunks that are REDUNDANT in the import map: every emitted
+	 * chunk minus the ones another chunk imports (statically or dynamically).
+	 * A redundant chunk is loaded only via a rendered <script>/<link> tag,
+	 * whose `integrity` attribute already protects it — so an import-map entry
+	 * for it adds nothing (issue #41). A chunk reached through another chunk's
+	 * static `import` or dynamic `import()` — even if it is also a declared
+	 * entry — is NOT redundant: its module-graph fetch carries no integrity
+	 * attribute and needs the map.
+	 *
+	 * Import identifiers are resolved with the same multi-strategy resolver as
+	 * analyzeDynamicImports, so identifiers arriving as module IDs, bundle
+	 * keys, or chunk names (Rollup/Rolldown/Vite differ here) all resolve.
+	 */
+	redundantImportMapChunks(bundle: OutputBundle): Set<string> {
+		const idToFileMap = this.buildModuleIdMappings(bundle);
+		const chunks = this.extractChunksFromBundle(bundle);
+		const imported = new Set<string>();
+		for (const chunk of chunks) {
+			const ids = [
+				...(chunk.imports || []),
+				...(chunk.dynamicImports || []),
+			];
+			for (const id of ids) {
+				const resolved = this.resolveDynamicImport(
+					id,
+					idToFileMap,
+					bundle
+				);
+				if (resolved) imported.add(resolved);
+			}
+		}
+		const redundant = new Set<string>();
+		for (const chunk of chunks) {
+			if (!imported.has(chunk.fileName)) redundant.add(chunk.fileName);
+		}
+		return redundant;
+	}
+
+	/**
 	 * Builds comprehensive mappings from module IDs to file names.
 	 * Creates multiple mapping strategies for robust dynamic import resolution.
 	 *
