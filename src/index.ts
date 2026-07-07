@@ -386,6 +386,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					);
 					dynamicChunkFiles =
 						dynamicImportAnalyzer.analyzeDynamicImports(bundle);
+					const redundantImportMapChunks =
+						dynamicImportAnalyzer.redundantImportMapChunks(bundle);
 
 					// Step 4: Process HTML files with comprehensive error handling.
 					// Skipped when the bundle emits no HTML (e.g. backend-owned HTML generation).
@@ -407,7 +409,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						await htmlProcessor.processHtmlFiles(
 							bundle,
 							sriByPathname,
-							dynamicChunkFiles
+							dynamicChunkFiles,
+							redundantImportMapChunks
 						);
 					}
 

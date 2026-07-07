@@ -1568,7 +1568,8 @@ export class HtmlProcessor {
 	async processHtmlFiles(
 		bundle: OutputBundle,
 		sriByPathname: Record<string, string>,
-		dynamicChunkFiles: Set<string>
+		dynamicChunkFiles: Set<string>,
+		redundantImportMapChunks: Set<string> = new Set()
 	): Promise<void> {
 		// ========================================================================
 		// HTML FILE EXTRACTION AND VALIDATION
@@ -1598,7 +1599,8 @@ export class HtmlProcessor {
 					asset,
 					bundle,
 					sriByPathname,
-					dynamicChunkFiles
+					dynamicChunkFiles,
+					redundantImportMapChunks
 				);
 				this.config.logger.info(
 					`Successfully processed HTML file: ${fileName}`
@@ -1680,7 +1682,8 @@ export class HtmlProcessor {
 		asset: OutputAsset,
 		bundle: OutputBundle,
 		sriByPathname: Record<string, string>,
-		dynamicChunkFiles: Set<string>
+		dynamicChunkFiles: Set<string>,
+		redundantImportMapChunks: Set<string> = new Set()
 	): Promise<void> {
 		// ========================================================================
 		// HTML CONTENT EXTRACTION AND VALIDATION
@@ -1725,7 +1728,8 @@ export class HtmlProcessor {
 		processedHtml = this.injectImportMap(
 			processedHtml,
 			sriByPathname,
-			fileName
+			fileName,
+			redundantImportMapChunks
 		);
 
 		// ========================================================================
@@ -1994,12 +1998,14 @@ export class HtmlProcessor {
 	private injectImportMap(
 		htmlContent: string,
 		sriByPathname: Record<string, string>,
-		fileName: string
+		fileName: string,
+		redundantImportMapChunks: Set<string> = new Set()
 	): string {
 		const integrityObject = buildImportIntegrityObject(
 			sriByPathname,
 			this.config.base,
-			this.config.skipResources
+			this.config.skipResources,
+			redundantImportMapChunks
 		);
 		// Relative base — no valid keys can be produced. The build-level log
 		// in generateBundle reports this once instead of once per HTML file.
