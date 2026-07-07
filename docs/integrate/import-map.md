@@ -4,13 +4,15 @@ description: "How the injected import map declares per-module integrity so dynam
 
 # Import Map Integrity
 
-When the build emits HTML and `base` is root-relative (`/`) or an absolute URL, the plugin injects a `<script type="importmap">` into each HTML file. The map declares an `integrity` object keyed by module URL, covering every emitted JS module:
+When the build emits HTML and `base` is root-relative (`/`) or an absolute URL, the plugin injects a `<script type="importmap">` into each HTML file. The map declares an `integrity` object keyed by module URL, covering the chunks the browser actually reaches through the module graph — chunks pulled in via another chunk's static `import` or dynamic `import()`:
 
 ```html
 <script type="importmap">
 {"integrity":{"/assets/index-B3sb0LQp.js":"sha384-…","/assets/chunk-Cab12xJ4.js":"sha384-…"}}
 </script>
 ```
+
+A chunk that's only ever loaded via a rendered top-level `<script>` or `<link>` tag is left out of the map — that tag's own `integrity` attribute already covers it, so listing it again in the map would be redundant. This means a build with a single JS bundle and no code splitting emits **no import map at all**: its one entry chunk is fully covered by its `<script integrity>` tag. This matters for strict-CSP sites (payment pages, banking flows) that would otherwise need to whitelist an inline import map via a CSP hash or nonce for no additional coverage benefit.
 
 Browsers that support import map integrity apply the declared hashes to every matching module fetch — static `import` statements, dynamic `import()` calls, and module preloads alike. A module whose bytes don't match the declared hash is refused before execution. This catches statically imported chunks that modulepreload discovery misses, such as facade re-export modules.
 
@@ -38,6 +40,8 @@ Import maps are necessarily inline — the HTML spec does not allow a `src` attr
 
 - **A nonce** — your server templating injects a fresh nonce into both the CSP header and the `<script>` tag. This is the recommended approach.
 - **A hash** — the browser can hash the inline script and match it against a `script-src` hash value. Note that the import map's content includes chunk content hashes, so it changes on every build. Automating hash extraction and CSP header updates is required.
+
+If your build has no code splitting, none of this applies — see above, no import map is injected in the first place, so there's nothing to whitelist.
 
 ## Limitations
 

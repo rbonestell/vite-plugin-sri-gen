@@ -44,7 +44,7 @@ flowchart TD
 
 - Adds `integrity` (and optionally `crossorigin`) to existing `<script>`, `<link rel="stylesheet">`, and `<link rel="modulepreload">` tags.
 - Injects `<link rel="modulepreload" integrity=...>` for each lazy chunk discovered in step 2 (when `preloadDynamicChunks` is enabled).
-- Injects or merges a `<script type="importmap">` carrying an `integrity` object for every emitted JS module.
+- Injects or merges a `<script type="importmap">` carrying an `integrity` object for the chunks reached through the module graph — chunks already covered by a rendered tag's own `integrity` attribute are excluded, so a build with no code splitting emits no import map at all.
 
 **Step 4 — Manifest augmentation.** If Vite emitted a build manifest (`build.manifest: true`), the plugin adds `integrity` and `cssIntegrity` fields to each manifest entry. This step runs even when no HTML was emitted, making it the primary path for backend-owned HTML generation.
 

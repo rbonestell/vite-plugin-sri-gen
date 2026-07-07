@@ -14,13 +14,15 @@ This covers every asset that Vite injects into your HTML during the build — yo
 
 ## Import Map Integrity
 
-Whenever the build emits HTML **and** `base` is root-relative (`/`) or an absolute URL, the plugin injects a `<script type="importmap">` into each HTML file:
+Whenever the build emits HTML **and** `base` is root-relative (`/`) or an absolute URL, the plugin injects a `<script type="importmap">` into each HTML file, listing the chunks reached through the module graph (via another chunk's static `import` or dynamic `import()`):
 
 ```html
 <script type="importmap">
 {"integrity":{"/assets/index-B3sb0LQp.js":"sha384-…","/assets/chunk-Cab12xJ4.js":"sha384-…"}}
 </script>
 ```
+
+A chunk that's only ever loaded via a rendered top-level `<script>`/`<link>` tag is left out — that tag's own `integrity` attribute already covers it. A build with a single JS bundle and no code splitting therefore emits no import map at all: its one entry chunk is fully covered by its `<script integrity>` tag.
 
 Browsers that support import map integrity (Chrome 127+, Firefox 138+, Safari 18+) apply the declared hashes to **every matching module fetch** — static `import` statements, dynamic `import()` calls, and module preloads alike. A module whose bytes don't match the declared hash is refused before execution.
 
@@ -89,7 +91,9 @@ flowchart TD
     B -- no --> C[Manifest augmentation only\nno HTML-side mechanisms]
     B -- yes --> D{base is root-relative\nor absolute URL?}
     D -- no\nrelative base --> E[Static tag SRI ✓\nImport map: skipped\nRuntime patching active if enabled]
-    D -- yes --> F[Static tag SRI ✓\nImport map integrity ✓]
+    D -- yes --> O{Any chunks reached\nvia the module graph?}
+    O -- no\nsingle bundle, no\ncode splitting --> P[Static tag SRI ✓\nImport map: skipped\nno redundant coverage needed]
+    O -- yes --> F[Static tag SRI ✓\nImport map integrity ✓]
     F --> G{preloadDynamicChunks?}
     G -- true\ndefault --> H[Modulepreload injection ✓\nJS rewrite: not needed]
     G -- false --> I{Manifest also\nemitted?}
@@ -102,7 +106,7 @@ flowchart TD
     classDef terminal fill:#16132a,stroke:#2dd4bf,color:#ccfbf1
     classDef decision fill:#16132a,stroke:#fbbf24,color:#fef3c7
     class A terminal
-    class B,D,G,I,L decision
+    class B,D,G,I,L,O decision
 ```
 
 ## Comparison
@@ -110,7 +114,7 @@ flowchart TD
 | Mechanism | What it covers | Browser support | Enabled by |
 | --- | --- | --- | --- |
 | Static tag SRI | `<script>`, `<link rel="stylesheet">`, `<link rel="modulepreload">` in HTML | All SRI-supporting browsers | Always on (HTML in bundle) |
-| import map integrity | All module fetches — static, dynamic, and preloaded | Chrome 127+, Firefox 138+, Safari 18+ | HTML in bundle + root-relative/absolute `base` |
+| import map integrity | Module fetches for chunks reached via the module graph (static/dynamic import) — excludes chunks already covered by a tag's own `integrity` | Chrome 127+, Firefox 138+, Safari 18+ | HTML in bundle + root-relative/absolute `base`; skipped entirely for single-bundle builds with no code splitting |
 | Modulepreload injection | Dynamically imported chunks (via preload + native SRI) | All SRI-supporting browsers | `preloadDynamicChunks: true` (default) |
 | Runtime patching | Dynamically created `<script>`/`<link>` elements | All browsers (JS-based) | `runtimePatchDynamicLinks: true` (default) |
 | JS `import()` rewriting | Dynamic `import()` call sites | All browsers with `crypto.subtle` (secure context) | Auto when `preloadDynamicChunks: false` + import map insufficient |
