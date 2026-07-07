@@ -226,6 +226,39 @@ describe("Internal Utility Functions", () => {
 				joinBaseHref("https://cdn.myapp.com/", "/assets/chunk.js")
 			).toBe("https://cdn.myapp.com/assets/chunk.js");
 		});
+
+		it("omits chunks whose filename is in excludeFileNames", () => {
+			expect(
+				buildImportIntegrityObject(
+					map,
+					"/",
+					[],
+					new Set(["assets/entry.js"])
+				)
+			).toEqual({
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("returns {} when every module chunk is excluded", () => {
+			expect(
+				buildImportIntegrityObject(
+					map,
+					"/",
+					[],
+					new Set(["assets/entry.js", "assets/chunk-B.mjs"])
+				)
+			).toEqual({});
+		});
+
+		it("treats an empty excludeFileNames as excluding nothing", () => {
+			expect(
+				buildImportIntegrityObject(map, "/", [], new Set())
+			).toEqual({
+				"/assets/entry.js": "sha384-AAA",
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
 	});
 
 	describe("extractPathnameFromResourceUrl", () => {

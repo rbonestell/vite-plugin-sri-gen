@@ -196,12 +196,15 @@ export function isImportMapCapableBase(base: string): boolean {
  * browser actually requests. Files matching a `skipResources` pattern are
  * excluded — the user opted those out of SRI enforcement entirely. Returns
  * null when `base` is relative (no valid keys can be produced — see
- * isImportMapCapableBase).
+ * isImportMapCapableBase). Chunks whose slash-free filename appears in
+ * excludeFileNames are omitted (they're protected by an integrity-bearing
+ * <script>/<link> tag — see issue #41).
  */
 export function buildImportIntegrityObject(
 	sriByPathname: Record<string, string>,
 	base: string,
-	skipResources: string[] = []
+	skipResources: string[] = [],
+	excludeFileNames: Set<string> = new Set()
 ): Record<string, string> | null {
 	if (!isImportMapCapableBase(base)) return null;
 	const result: Record<string, string> = {};
@@ -210,6 +213,7 @@ export function buildImportIntegrityObject(
 		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
 		if (isSkippedResource(fileName, skipResources)) continue;
+		if (excludeFileNames.has(fileName)) continue;
 		result[joinBaseHref(base, fileName)] = integrity;
 	}
 	return result;
