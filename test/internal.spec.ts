@@ -1409,8 +1409,36 @@ describe("Processing Classes", () => {
 				};
 			}
 
-			it("marks a lone entry (imported by nobody) as redundant", () => {
-				const bundle: any = { "assets/entry.js": chunk("assets/entry.js") };
+			function htmlAsset(...scriptFiles: string[]): any {
+				return {
+					type: "asset",
+					source: `<html><body>${scriptFiles
+						.map(
+							(f) =>
+								`<script type="module" src="/${f}"></script>`
+						)
+						.join("")}</body></html>`,
+				};
+			}
+
+			it("marks a lone HTML-referenced entry (imported by nobody) as redundant", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a chunk with no import edges that no HTML references (no tag-coverage evidence)", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js"),
+					"assets/orphan.js": chunk("assets/orphan.js"),
+				};
+				// orphan.js has no import edges AND no HTML tag — nothing else
+				// protects it, so it must stay in the import map.
 				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
 					new Set(["assets/entry.js"])
 				);
@@ -1418,6 +1446,7 @@ describe("Processing Classes", () => {
 
 			it("keeps a statically-imported chunk out of the redundant set (module-id form)", () => {
 				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
 					"assets/entry.js": chunk("assets/entry.js", {
 						imports: ["src/vendor.ts"],
 					}),
@@ -1433,6 +1462,7 @@ describe("Processing Classes", () => {
 
 			it("keeps a statically-imported chunk out of the redundant set (bundle-key form)", () => {
 				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
 					"assets/entry.js": chunk("assets/entry.js", {
 						imports: ["assets/vendor.js"],
 					}),
@@ -1445,6 +1475,7 @@ describe("Processing Classes", () => {
 
 			it("keeps a dynamically-imported chunk out of the redundant set", () => {
 				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
 					"assets/entry.js": chunk("assets/entry.js", {
 						dynamicImports: ["src/lazy.ts"],
 					}),
@@ -1460,6 +1491,8 @@ describe("Processing Classes", () => {
 
 			it("keeps a shared entry that another entry statically imports (MPA guard)", () => {
 				const bundle: any = {
+					"index.html": htmlAsset("assets/main.js"),
+					"page-b.html": htmlAsset("assets/shared.js"),
 					"assets/main.js": chunk("assets/main.js", {
 						isEntry: true,
 						imports: ["src/shared.ts"],
@@ -1470,7 +1503,8 @@ describe("Processing Classes", () => {
 						facadeModuleId: "src/shared.ts",
 					}),
 				};
-				// main is imported by nobody -> redundant; shared is imported by main -> kept.
+				// main is imported by nobody -> redundant; shared is imported
+				// by main -> kept even though page B renders it as a tag.
 				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
 					new Set(["assets/main.js"])
 				);
@@ -1479,10 +1513,28 @@ describe("Processing Classes", () => {
 			it("ignores non-chunk assets", () => {
 				const bundle: any = {
 					"assets/entry.js": chunk("assets/entry.js"),
-					"index.html": { type: "asset", source: "" },
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/style.css": { type: "asset", source: "" },
 				};
 				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
 					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("warns when an import identifier cannot be resolved to a chunk", () => {
+				const mockLogger = createMockBundleLogger();
+				const localAnalyzer = new DynamicImportAnalyzer(mockLogger);
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["src/missing.ts"],
+					}),
+				};
+				localAnalyzer.redundantImportMapChunks(bundle);
+				expect(mockLogger.warn).toHaveBeenCalledWith(
+					expect.stringContaining(
+						'Could not resolve import "src/missing.ts"'
+					)
 				);
 			});
 		});

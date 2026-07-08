@@ -1300,6 +1300,18 @@ export class DynamicImportAnalyzer {
 	private readonly logger: BundleLogger;
 
 	/**
+	 * Per-bundle memos: analyzeDynamicImports and redundantImportMapChunks
+	 * both derive the same chunk list and module-id map from the same bundle
+	 * in one generateBundle pass. WeakMap keys mean a new bundle object gets
+	 * fresh results and old bundles are garbage-collected with their caches.
+	 */
+	private readonly chunksCache = new WeakMap<OutputBundle, OutputChunk[]>();
+	private readonly idMapCache = new WeakMap<
+		OutputBundle,
+		Map<string, string>
+	>();
+
+	/**
 	 * Constructs a new DynamicImportAnalyzer with the provided logger.
 	 *
 	 * @param logger - Logger instance for consistent reporting
@@ -1374,14 +1386,18 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
-	 * Filenames of chunks that are REDUNDANT in the import map: every emitted
-	 * chunk minus the ones another chunk imports (statically or dynamically).
-	 * A redundant chunk is loaded only via a rendered <script>/<link> tag,
-	 * whose `integrity` attribute already protects it — so an import-map entry
-	 * for it adds nothing (issue #41). A chunk reached through another chunk's
-	 * static `import` or dynamic `import()` — even if it is also a declared
-	 * entry — is NOT redundant: its module-graph fetch carries no integrity
-	 * attribute and needs the map.
+	 * Filenames of chunks that are REDUNDANT in the import map: chunks that
+	 * (a) no other chunk imports (statically or dynamically) AND (b) are
+	 * referenced by an emitted HTML file. Such a chunk is loaded only via a
+	 * rendered <script>/<link> tag, whose `integrity` attribute already
+	 * protects it — so an import-map entry for it adds nothing (issue #41).
+	 * A chunk reached through another chunk's static `import` or dynamic
+	 * `import()` — even if it is also a declared entry — is NOT redundant:
+	 * its module-graph fetch carries no integrity attribute and needs the
+	 * map. Likewise a chunk with no import edges that is NOT referenced by
+	 * any emitted HTML (e.g. an extra input consumed by server-rendered
+	 * templates, or loaded via a runtime-constructed import(url)) stays in
+	 * the map — nothing else protects it.
 	 *
 	 * Import identifiers are resolved with the same multi-strategy resolver as
 	 * analyzeDynamicImports, so identifiers arriving as module IDs, bundle
@@ -1402,12 +1418,42 @@ export class DynamicImportAnalyzer {
 					idToFileMap,
 					bundle
 				);
-				if (resolved) imported.add(resolved);
+				if (resolved) {
+					imported.add(resolved);
+				} else {
+					// An unresolved identifier could mean a genuinely-imported
+					// chunk goes unrecognized; surface it like
+					// analyzeDynamicImports does rather than failing silently.
+					this.logger.warn(
+						`Could not resolve import "${id}" to a chunk file`
+					);
+				}
 			}
 		}
+		// Positive tag evidence: a chunk only counts as tag-covered when an
+		// emitted HTML file actually references it. Absence of import edges
+		// alone is NOT proof of coverage.
+		const htmlSources = Object.entries(bundle)
+			.filter(
+				([fileName, item]) =>
+					item.type === "asset" &&
+					fileName.toLowerCase().endsWith(".html")
+			)
+			.map(([, asset]) => {
+				const source = (asset as OutputAsset).source;
+				if (typeof source === "string") return source;
+				if (source instanceof Uint8Array) {
+					return Buffer.from(source).toString("utf8");
+				}
+				// Malformed source — no tag evidence, chunk stays in the map.
+				return "";
+			});
 		const redundant = new Set<string>();
 		for (const chunk of chunks) {
-			if (!imported.has(chunk.fileName)) redundant.add(chunk.fileName);
+			if (imported.has(chunk.fileName)) continue;
+			if (htmlSources.some((src) => src.includes(chunk.fileName))) {
+				redundant.add(chunk.fileName);
+			}
 		}
 		return redundant;
 	}
@@ -1425,6 +1471,8 @@ export class DynamicImportAnalyzer {
 	 * @returns Map<string, string> - Module ID to file name mappings
 	 */
 	private buildModuleIdMappings(bundle: OutputBundle): Map<string, string> {
+		const cached = this.idMapCache.get(bundle);
+		if (cached) return cached;
 		const idToFileMap = new Map<string, string>();
 		const chunks = this.extractChunksFromBundle(bundle);
 
@@ -1450,6 +1498,7 @@ export class DynamicImportAnalyzer {
 		this.logger.info(
 			`Built module ID mappings for ${idToFileMap.size} entries`
 		);
+		this.idMapCache.set(bundle, idToFileMap);
 		return idToFileMap;
 	}
 
@@ -1461,9 +1510,13 @@ export class DynamicImportAnalyzer {
 	 * @returns OutputChunk[] - Array of valid chunks
 	 */
 	private extractChunksFromBundle(bundle: OutputBundle): OutputChunk[] {
-		return Object.values(bundle).filter(
+		const cached = this.chunksCache.get(bundle);
+		if (cached) return cached;
+		const chunks = Object.values(bundle).filter(
 			(item): item is OutputChunk => item.type === "chunk"
 		);
+		this.chunksCache.set(bundle, chunks);
+		return chunks;
 	}
 
 	/**
@@ -1683,7 +1736,7 @@ export class HtmlProcessor {
 		bundle: OutputBundle,
 		sriByPathname: Record<string, string>,
 		dynamicChunkFiles: Set<string>,
-		redundantImportMapChunks: Set<string> = new Set()
+		redundantImportMapChunks: Set<string>
 	): Promise<void> {
 		// ========================================================================
 		// HTML CONTENT EXTRACTION AND VALIDATION
@@ -1999,7 +2052,7 @@ export class HtmlProcessor {
 		htmlContent: string,
 		sriByPathname: Record<string, string>,
 		fileName: string,
-		redundantImportMapChunks: Set<string> = new Set()
+		redundantImportMapChunks: Set<string>
 	): string {
 		const integrityObject = buildImportIntegrityObject(
 			sriByPathname,

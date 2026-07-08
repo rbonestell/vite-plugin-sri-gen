@@ -2557,7 +2557,12 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 });
 
 describe("import map SRI", () => {
-	function buildPluginBundle(base = "/", html = htmlDoc("")) {
+	function buildPluginBundle(
+		base = "/",
+		html = htmlDoc(
+			'<script type="module" src="/assets/entry.js"></script>'
+		)
+	) {
 		const plugin = sri({
 			algorithm: "sha256",
 			preloadDynamicChunks: false,
@@ -2583,7 +2588,12 @@ describe("import map SRI", () => {
 		}) as any;
 		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 		const bundle: Record<string, Chunk | Asset> = {
-			"index.html": { type: "asset", source: htmlDoc("") },
+			"index.html": {
+				type: "asset",
+				source: htmlDoc(
+					'<script type="module" src="/assets/entry.js"></script>'
+				),
+			},
 			"assets/entry.js": makeEntryChunk({ code: "" }),
 		} as any;
 		await plugin.generateBundle.handler({}, bundle as any);
@@ -2610,7 +2620,12 @@ describe("import map SRI", () => {
 		}) as any;
 		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 		const bundle: Record<string, Chunk | Asset> = {
-			"index.html": { type: "asset", source: htmlDoc("") },
+			"index.html": {
+				type: "asset",
+				source: htmlDoc(
+					'<script type="module" src="/assets/main.js"></script>'
+				),
+			},
 			"assets/main.js": makeEntryChunk({
 				fileName: "assets/main.js",
 				code: "",
@@ -2745,7 +2760,12 @@ describe("import map SRI", () => {
 		}) as any;
 		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
 		const bundle: Record<string, Chunk | Asset> = {
-			"index.html": { type: "asset", source: htmlDoc("") },
+			"index.html": {
+				type: "asset",
+				source: htmlDoc(
+					'<script type="module" src="/assets/entry.js"></script>'
+				),
+			},
 			"assets/entry.js": makeEntryChunk({
 				code: "",
 				imports: ["src/vendor.ts"],
@@ -2770,7 +2790,7 @@ describe("import map SRI", () => {
 		const existing = '<script type="importmap"></script>';
 		const { plugin, bundle } = buildPluginBundle(
 			"/",
-			`<!doctype html><html><head>${existing}</head><body></body></html>`
+			`<!doctype html><html><head>${existing}</head><body><script type="module" src="/assets/entry.js"></script></body></html>`
 		);
 		await plugin.generateBundle.handler({}, bundle as any);
 		const html = String((bundle["index.html"] as Asset).source);
@@ -2793,7 +2813,12 @@ describe("import map SRI", () => {
 			build: { ssr: false },
 		} as any);
 		const bundle: Record<string, Chunk | Asset> = {
-			"index.html": { type: "asset", source: htmlDoc("") },
+			"index.html": {
+				type: "asset",
+				source: htmlDoc(
+					'<script type="module" src="https://cdn.example.com/assets/entry.js"></script>'
+				),
+			},
 			"assets/entry.js": makeEntryChunk({
 				code: "",
 				dynamicImports: ["src/lazy.ts"],

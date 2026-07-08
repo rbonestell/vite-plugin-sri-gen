@@ -386,13 +386,17 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					);
 					dynamicChunkFiles =
 						dynamicImportAnalyzer.analyzeDynamicImports(bundle);
-					const redundantImportMapChunks =
-						dynamicImportAnalyzer.redundantImportMapChunks(bundle);
 
 					// Step 4: Process HTML files with comprehensive error handling.
 					// Skipped when the bundle emits no HTML (e.g. backend-owned HTML generation).
 					if (hasHtmlFiles) {
 						logger.info("Processing HTML files for SRI injection");
+						// Only consumed by the import-map injection below — no
+						// point walking the graph for manifest-only builds.
+						const redundantImportMapChunks =
+							dynamicImportAnalyzer.redundantImportMapChunks(
+								bundle
+							);
 						const htmlProcessor = new HtmlProcessor({
 							algorithm,
 							crossorigin,

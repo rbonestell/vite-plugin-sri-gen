@@ -14,6 +14,8 @@ When the build emits HTML and `base` is root-relative (`/`) or an absolute URL, 
 
 A chunk that's only ever loaded via a rendered top-level `<script>` or `<link>` tag is left out of the map — that tag's own `integrity` attribute already covers it, so listing it again in the map would be redundant. This means a build with a single JS bundle and no code splitting emits **no import map at all**: its one entry chunk is fully covered by its `<script integrity>` tag. This matters for strict-CSP sites (payment pages, banking flows) that would otherwise need to whitelist an inline import map via a CSP hash or nonce for no additional coverage benefit.
 
+A chunk is only dropped from the map when an emitted HTML file actually references it — absence of import edges alone isn't taken as proof of tag coverage. A chunk with no incoming imports that never appears in the build's own HTML (an extra `rollupOptions.input` entry consumed by server-rendered templates, or a module loaded through a runtime-constructed `import(url)`) stays in the map, since nothing else would verify it.
+
 Browsers that support import map integrity apply the declared hashes to every matching module fetch — static `import` statements, dynamic `import()` calls, and module preloads alike. A module whose bytes don't match the declared hash is refused before execution. This catches statically imported chunks that modulepreload discovery misses, such as facade re-export modules.
 
 ## Browser Support
