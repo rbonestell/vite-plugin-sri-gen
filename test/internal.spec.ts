@@ -226,6 +226,57 @@ describe("Internal Utility Functions", () => {
 				joinBaseHref("https://cdn.myapp.com/", "/assets/chunk.js")
 			).toBe("https://cdn.myapp.com/assets/chunk.js");
 		});
+
+		it("omits chunks whose filename is in excludeFileNames", () => {
+			expect(
+				buildImportIntegrityObject(
+					map,
+					"/",
+					[],
+					new Set(["assets/entry.js"])
+				)
+			).toEqual({
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("returns {} when every module chunk is excluded", () => {
+			expect(
+				buildImportIntegrityObject(
+					map,
+					"/",
+					[],
+					new Set(["assets/entry.js", "assets/chunk-B.mjs"])
+				)
+			).toEqual({});
+		});
+
+		it("treats an empty excludeFileNames as excluding nothing", () => {
+			expect(
+				buildImportIntegrityObject(map, "/", [], new Set())
+			).toEqual({
+				"/assets/entry.js": "sha384-AAA",
+				"/assets/chunk-B.mjs": "sha384-BBB",
+			});
+		});
+
+		it("normalizes bare (non-slash-rooted) pathnames when building keys", () => {
+			expect(
+				buildImportIntegrityObject(
+					{ "assets/raw.js": "sha384-RAW" },
+					"/"
+				)
+			).toEqual({ "/assets/raw.js": "sha384-RAW" });
+			// Exclusion matches the same bare form.
+			expect(
+				buildImportIntegrityObject(
+					{ "assets/raw.js": "sha384-RAW" },
+					"/",
+					[],
+					new Set(["assets/raw.js"])
+				)
+			).toEqual({});
+		});
 	});
 
 	describe("extractPathnameFromResourceUrl", () => {
@@ -1354,6 +1405,197 @@ describe("Processing Classes", () => {
 
 			expect(result.size).toBe(1);
 			expect(result.has("assets/chunk-abc123.js")).toBe(true);
+		});
+
+		describe("redundantImportMapChunks", () => {
+			const analyzer = new DynamicImportAnalyzer(createMockBundleLogger());
+
+			function chunk(
+				fileName: string,
+				extra: Record<string, unknown> = {}
+			): any {
+				return {
+					type: "chunk",
+					fileName,
+					code: "",
+					imports: [],
+					dynamicImports: [],
+					modules: {},
+					name: fileName,
+					facadeModuleId: null,
+					...extra,
+				};
+			}
+
+			function htmlAsset(...scriptFiles: string[]): any {
+				return {
+					type: "asset",
+					source: `<html><body>${scriptFiles
+						.map(
+							(f) =>
+								`<script type="module" src="/${f}"></script>`
+						)
+						.join("")}</body></html>`,
+				};
+			}
+
+			it("marks a lone HTML-referenced entry (imported by nobody) as redundant", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a chunk with no import edges that no HTML references (no tag-coverage evidence)", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js"),
+					"assets/orphan.js": chunk("assets/orphan.js"),
+				};
+				// orphan.js has no import edges AND no HTML tag — nothing else
+				// protects it, so it must stay in the import map.
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a statically-imported chunk out of the redundant set (module-id form)", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["src/vendor.ts"],
+					}),
+					"assets/vendor.js": chunk("assets/vendor.js", {
+						modules: { "src/vendor.ts": {} },
+						facadeModuleId: "src/vendor.ts",
+					}),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a statically-imported chunk out of the redundant set (bundle-key form)", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["assets/vendor.js"],
+					}),
+					"assets/vendor.js": chunk("assets/vendor.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a dynamically-imported chunk out of the redundant set", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js", {
+						dynamicImports: ["src/lazy.ts"],
+					}),
+					"assets/lazy.js": chunk("assets/lazy.js", {
+						modules: { "src/lazy.ts": {} },
+						facadeModuleId: "src/lazy.ts",
+					}),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("keeps a shared entry that another entry statically imports (MPA guard)", () => {
+				const bundle: any = {
+					"index.html": htmlAsset("assets/main.js"),
+					"page-b.html": htmlAsset("assets/shared.js"),
+					"assets/main.js": chunk("assets/main.js", {
+						isEntry: true,
+						imports: ["src/shared.ts"],
+					}),
+					"assets/shared.js": chunk("assets/shared.js", {
+						isEntry: true,
+						modules: { "src/shared.ts": {} },
+						facadeModuleId: "src/shared.ts",
+					}),
+				};
+				// main is imported by nobody -> redundant; shared is imported
+				// by main -> kept even though page B renders it as a tag.
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/main.js"])
+				);
+			});
+
+			it("ignores non-chunk assets", () => {
+				const bundle: any = {
+					"assets/entry.js": chunk("assets/entry.js"),
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/style.css": { type: "asset", source: "" },
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("does not count an inline-script mention of a filename as tag coverage", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: "<html><body><script>import('/assets/entry.js')</script></body></html>",
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				// The filename appears only inside inline script text — no
+				// integrity-bearing tag exists, so the chunk stays in the map.
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set()
+				);
+			});
+
+			it("counts a <link href> reference as tag coverage", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: '<html><head><link rel="modulepreload" href="/assets/entry.js"></head><body></body></html>',
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("matches tag URLs carrying a query string", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: '<html><body><script type="module" src="/assets/entry.js?v=abc123"></script></body></html>',
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("warns when an import identifier cannot be resolved to a chunk", () => {
+				const mockLogger = createMockBundleLogger();
+				const localAnalyzer = new DynamicImportAnalyzer(mockLogger);
+				const bundle: any = {
+					"index.html": htmlAsset("assets/entry.js"),
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["src/missing.ts"],
+					}),
+				};
+				localAnalyzer.redundantImportMapChunks(bundle);
+				expect(mockLogger.warn).toHaveBeenCalledWith(
+					expect.stringContaining(
+						'Could not resolve import "src/missing.ts"'
+					)
+				);
+			});
 		});
 	});
 
