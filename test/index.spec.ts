@@ -2922,6 +2922,34 @@ describe("import map SRI", () => {
 		}
 	});
 
+	it("warns when an existing import map pins a stale hash for a tag-covered (excluded) chunk", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			// entry.js is excluded from the injected map (tag-covered), but a
+			// stale user-pinned hash for it must still be flagged.
+			const existing =
+				'<script type="importmap">{"integrity":{"/assets/entry.js":"sha256-STALE"}}</script>';
+			const { plugin, bundle } = buildPluginBundle(
+				"/",
+				`<!doctype html><html><head>${existing}</head><body><script type="module" src="/assets/entry.js"></script></body></html>`
+			);
+			await plugin.generateBundle.handler({}, bundle as any);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("differs from the build-computed hash")
+			);
+			// User precedence still applies to the merged result.
+			const html = String((bundle["index.html"] as Asset).source);
+			const m = html.match(
+				/<script type="importmap">([\s\S]*?)<\/script>/
+			);
+			const parsed = JSON.parse(m![1]);
+			expect(parsed.integrity["/assets/entry.js"]).toBe("sha256-STALE");
+			expect(parsed.integrity["/assets/lazy.js"]).toMatch(/^sha256-/);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
 	it("warns when the HTML contains an absolute <base href> that changes key resolution", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {

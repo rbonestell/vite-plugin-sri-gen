@@ -1304,6 +1304,12 @@ export class DynamicImportAnalyzer {
 	 * both derive the same chunk list and module-id map from the same bundle
 	 * in one generateBundle pass. WeakMap keys mean a new bundle object gets
 	 * fresh results and old bundles are garbage-collected with their caches.
+	 *
+	 * CAUTION: the cache is keyed by bundle object identity, not contents.
+	 * Adding or removing bundle chunks between calls on the same analyzer
+	 * instance returns stale results — do all bundle-shape mutation (e.g.
+	 * runtime injection) BEFORE constructing the analyzer, or construct a
+	 * fresh analyzer after mutating.
 	 */
 	private readonly chunksCache = new WeakMap<OutputBundle, OutputChunk[]>();
 	private readonly idMapCache = new WeakMap<
@@ -1431,27 +1437,52 @@ export class DynamicImportAnalyzer {
 			}
 		}
 		// Positive tag evidence: a chunk only counts as tag-covered when an
-		// emitted HTML file actually references it. Absence of import edges
-		// alone is NOT proof of coverage.
-		const htmlSources = Object.entries(bundle)
-			.filter(
-				([fileName, item]) =>
-					item.type === "asset" &&
-					fileName.toLowerCase().endsWith(".html")
-			)
-			.map(([, asset]) => {
-				const source = (asset as OutputAsset).source;
-				if (typeof source === "string") return source;
-				if (source instanceof Uint8Array) {
-					return Buffer.from(source).toString("utf8");
-				}
+		// emitted HTML file references it via a <script src> or <link href>
+		// attribute — the element shapes the SRI pass stamps. Inline-script
+		// text, comments, or embedded JSON mentioning a filename are NOT
+		// evidence, and absence of import edges alone is NOT proof of
+		// coverage.
+		const tagUrls: string[] = [];
+		for (const [fileName, item] of Object.entries(bundle)) {
+			if (
+				item.type !== "asset" ||
+				!fileName.toLowerCase().endsWith(".html")
+			) {
+				continue;
+			}
+			const source = (item as OutputAsset).source;
+			let html: string;
+			if (typeof source === "string") {
+				html = source;
+			} else if (source instanceof Uint8Array) {
+				html = Buffer.from(source).toString("utf8");
+			} else {
 				// Malformed source — no tag evidence, chunk stays in the map.
-				return "";
-			});
+				continue;
+			}
+			const document = parse(html, { sourceCodeLocationInfo: false });
+			for (const el of findElements(document, (node) => {
+				const name = node.nodeName?.toLowerCase();
+				return name === "script" || name === "link";
+			})) {
+				const url = getAttrValue(
+					el,
+					el.nodeName.toLowerCase() === "script" ? "src" : "href"
+				);
+				// Strip query/hash so hashed-URL variants still match.
+				if (url) tagUrls.push(url.split(/[?#]/)[0]);
+			}
+		}
+		const isTagReferenced = (chunkFileName: string): boolean =>
+			tagUrls.some(
+				(url) =>
+					url === chunkFileName ||
+					url.endsWith("/" + chunkFileName)
+			);
 		const redundant = new Set<string>();
 		for (const chunk of chunks) {
 			if (imported.has(chunk.fileName)) continue;
-			if (htmlSources.some((src) => src.includes(chunk.fileName))) {
+			if (isTagReferenced(chunk.fileName)) {
 				redundant.add(chunk.fileName);
 			}
 		}
@@ -2131,13 +2162,23 @@ export class HtmlProcessor {
 				// hash is almost always a mistake (stale template, or a
 				// tampered build input), so surface it loudly.
 				const userIntegrity = parsed.integrity ?? {};
+				// Compare against the UNFILTERED hashes: a user-pinned entry
+				// for a tag-covered chunk (excluded from the injected map) is
+				// just as likely to be stale or tampered, so it still gets
+				// flagged even though we no longer emit that key ourselves.
+				const fullIntegrityObject =
+					buildImportIntegrityObject(
+						sriByPathname,
+						this.config.base,
+						this.config.skipResources
+					) ?? {};
 				for (const [key, value] of Object.entries(userIntegrity)) {
 					if (
-						key in integrityObject &&
-						integrityObject[key] !== value
+						key in fullIntegrityObject &&
+						fullIntegrityObject[key] !== value
 					) {
 						this.config.logger.warn(
-							`Existing import map in ${fileName} pins integrity for ${key} (${String(value)}) that differs from the build-computed hash (${integrityObject[key]}); keeping the existing entry`
+							`Existing import map in ${fileName} pins integrity for ${key} (${String(value)}) that differs from the build-computed hash (${fullIntegrityObject[key]}); keeping the existing entry`
 						);
 					}
 				}

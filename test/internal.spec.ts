@@ -1539,6 +1539,47 @@ describe("Processing Classes", () => {
 				);
 			});
 
+			it("does not count an inline-script mention of a filename as tag coverage", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: "<html><body><script>import('/assets/entry.js')</script></body></html>",
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				// The filename appears only inside inline script text — no
+				// integrity-bearing tag exists, so the chunk stays in the map.
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set()
+				);
+			});
+
+			it("counts a <link href> reference as tag coverage", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: '<html><head><link rel="modulepreload" href="/assets/entry.js"></head><body></body></html>',
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("matches tag URLs carrying a query string", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: '<html><body><script type="module" src="/assets/entry.js?v=abc123"></script></body></html>',
+					},
+					"assets/entry.js": chunk("assets/entry.js"),
+				};
+				expect(analyzer.redundantImportMapChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
 			it("warns when an import identifier cannot be resolved to a chunk", () => {
 				const mockLogger = createMockBundleLogger();
 				const localAnalyzer = new DynamicImportAnalyzer(mockLogger);
