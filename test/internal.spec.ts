@@ -259,6 +259,24 @@ describe("Internal Utility Functions", () => {
 				"/assets/chunk-B.mjs": "sha384-BBB",
 			});
 		});
+
+		it("normalizes bare (non-slash-rooted) pathnames when building keys", () => {
+			expect(
+				buildImportIntegrityObject(
+					{ "assets/raw.js": "sha384-RAW" },
+					"/"
+				)
+			).toEqual({ "/assets/raw.js": "sha384-RAW" });
+			// Exclusion matches the same bare form.
+			expect(
+				buildImportIntegrityObject(
+					{ "assets/raw.js": "sha384-RAW" },
+					"/",
+					[],
+					new Set(["assets/raw.js"])
+				)
+			).toEqual({});
+		});
 	});
 
 	describe("extractPathnameFromResourceUrl", () => {

@@ -2922,6 +2922,94 @@ describe("import map SRI", () => {
 		}
 	});
 
+	it("warns when the HTML contains an absolute <base href> that changes key resolution", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { plugin, bundle } = buildPluginBundle(
+				"/",
+				'<!doctype html><html><head><base href="https://cdn.example.com/app/"></head><body><script type="module" src="/assets/entry.js"></script></body></html>'
+			);
+			await plugin.generateBundle.handler({}, bundle as any);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"resolve against the document base URL"
+				)
+			);
+			// Advisory only — the map is still injected.
+			const html = String((bundle["index.html"] as Asset).source);
+			expect(html).toContain('type="importmap"');
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("does not warn for a relative <base href>", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { plugin, bundle } = buildPluginBundle(
+				"/",
+				'<!doctype html><html><head><base href="/app/"></head><body><script type="module" src="/assets/entry.js"></script></body></html>'
+			);
+			await plugin.generateBundle.handler({}, bundle as any);
+			const baseWarnings = warnSpy.mock.calls.filter((c) =>
+				String(c[0]).includes("document base URL")
+			);
+			expect(baseWarnings).toEqual([]);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("logs an error and leaves the HTML unchanged when import map injection fails", async () => {
+		const errorSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		try {
+			// "null" is valid JSON, so the merge path proceeds past the
+			// invalid-JSON guard and throws on property access — exercising
+			// the outer error boundary.
+			const existing = '<script type="importmap">null</script>';
+			const { plugin, bundle } = buildPluginBundle(
+				"/",
+				`<!doctype html><html><head>${existing}</head><body><script type="module" src="/assets/entry.js"></script></body></html>`
+			);
+			await plugin.generateBundle.handler({}, bundle as any);
+			expect(
+				errorSpy.mock.calls.some((c) =>
+					String(c[0]).includes("Failed to inject import map")
+				)
+			).toBe(true);
+			const html = String((bundle["index.html"] as Asset).source);
+			expect(html).toContain(">null</script>"); // map left untouched
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	it("injects the runtime without rewriting when no dynamic import() calls exist (relative base)", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: true,
+		}) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": {
+				type: "asset",
+				source: htmlDoc(
+					'<script type="module" src="assets/entry.js"></script>'
+				),
+			},
+			"assets/entry.js": makeEntryChunk({ code: "console.log(1);" }),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+		// Runtime installed even though nothing needed rewriting; the user
+		// code itself is prepended-to but otherwise untouched.
+		expect(entryCode).toContain("enforceDynamicImports: true");
+		expect(entryCode.endsWith("console.log(1);")).toBe(true);
+	});
+
 	it("keeps a leading meta charset before the injected import map", async () => {
 		const { plugin, bundle } = buildPluginBundle(
 			"/",
