@@ -72,6 +72,13 @@ export interface HtmlProcessorConfig {
 	base: string;
 	/** Whether to inject modulepreload links for dynamic chunks */
 	preloadDynamicChunks: boolean;
+	/**
+	 * Whether to deliver module-graph integrity via an inline
+	 * `<script type="importmap">`. When false, no inline script is emitted and
+	 * the same hashes are delivered as `<link rel="modulepreload" integrity>`
+	 * instead. Defaults to true when omitted.
+	 */
+	importMapIntegrity?: boolean;
 	/** Whether to enable HTTP caching for remote resources */
 	enableCache: boolean;
 	/** HTTP cache storage for remote resource bytes */
@@ -178,6 +185,45 @@ export function joinBaseHref(base: string, chunkFile: string): string {
 }
 
 /**
+ * The href to use for an injected `<link rel="modulepreload">` in a specific
+ * HTML document.
+ *
+ * Absolute and root-relative bases are document-independent, so joinBaseHref
+ * is exact. A RELATIVE base is not: the browser resolves the href against the
+ * document's own URL, so an HTML file emitted into a subdirectory needs a
+ * different string than one at the output root. joinBaseHref is a pure
+ * function of (base, chunkFile) and would emit an identical href for every
+ * page — correct only at the root, and silently wrong everywhere else. A
+ * mismatched preload URL never matches the loader's real fetch, so SRI is not
+ * enforced and a bogus request is issued.
+ *
+ * Both `chunkFile` and `htmlFileName` are bundle-relative, so for a relative
+ * base the answer is simply the path from the document's directory to the
+ * chunk — which is what Vite itself emits for its own tags.
+ *
+ * @example
+ * preloadHref("./", "assets/dep.js", "admin/index.html")
+ * // "../assets/dep.js"
+ *
+ * preloadHref("./", "assets/dep.js", "index.html")
+ * // "./assets/dep.js"
+ */
+export function preloadHref(
+	base: string,
+	chunkFile: string,
+	htmlFileName: string
+): string {
+	if (isHttpUrl(base) || base.startsWith("/")) {
+		return joinBaseHref(base, chunkFile);
+	}
+	const dir = path.posix.dirname(htmlFileName);
+	const rel = path.posix.relative(dir === "" ? "." : dir, chunkFile);
+	// Match Vite's own "./"-prefixed style so duplicate detection against the
+	// links Vite already emitted compares equal.
+	return rel.startsWith("..") ? rel : `./${rel}`;
+}
+
+/**
  * Whether the resolved Vite `base` can produce valid import map `integrity`
  * keys. Import map keys must be URL-like — root-relative (`/...`),
  * `./`/`../`-relative, or absolute URLs. The plugin only emits root-relative
@@ -208,15 +254,46 @@ export function buildImportIntegrityObject(
 ): Record<string, string> | null {
 	if (!isImportMapCapableBase(base)) return null;
 	const result: Record<string, string> = {};
-	for (const [pathname, integrity] of Object.entries(sriByPathname)) {
+	for (const { pathname, fileName } of collectModuleChunkFiles(
+		sriByPathname,
+		skipResources,
+		excludeFileNames
+	)) {
+		result[joinBaseHref(base, fileName)] = sriByPathname[pathname];
+	}
+	return result;
+}
+
+/**
+ * The set of emitted JS module chunks that need integrity delivered through a
+ * module-graph channel — i.e. every hashed .js/.mjs asset except those the user
+ * opted out of via `skipResources` and those already protected by an
+ * integrity-bearing <script>/<link> tag (excludeFileNames).
+ *
+ * This is the single source of truth for module-graph coverage. Both delivery
+ * channels consume it: the inline import map (buildImportIntegrityObject) and
+ * modulepreload injection when the import map is disabled. Keeping one
+ * definition is what makes the channels interchangeable without leaving gaps.
+ *
+ * Unlike buildImportIntegrityObject this does not require an import-map-capable
+ * base: modulepreload hrefs resolve against the document URL, so a relative
+ * `base` that cannot produce valid import map keys still produces valid links.
+ */
+export function collectModuleChunkFiles(
+	sriByPathname: Record<string, string>,
+	skipResources: string[] = [],
+	excludeFileNames: Set<string> = new Set()
+): Array<{ pathname: string; fileName: string }> {
+	const files: Array<{ pathname: string; fileName: string }> = [];
+	for (const pathname of Object.keys(sriByPathname)) {
 		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
 		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
 		if (isSkippedResource(fileName, skipResources)) continue;
 		if (excludeFileNames.has(fileName)) continue;
-		result[joinBaseHref(base, fileName)] = integrity;
+		files.push({ pathname, fileName });
 	}
-	return result;
+	return files;
 }
 
 /**
@@ -1794,12 +1871,34 @@ export class HtmlProcessor {
 		// DYNAMIC CHUNK PRELOAD INJECTION
 		// ========================================================================
 
-		// Step 2: Add preload links for dynamic chunks (if enabled)
-		if (this.config.preloadDynamicChunks && dynamicChunkFiles.size > 0) {
+		// Step 2: Add preload links for dynamic chunks (if enabled).
+		//
+		// With the import map disabled there is no inline-script channel, so the
+		// preload set widens from "dynamically imported chunks" to the whole
+		// module graph. That closes the one gap the map used to cover alone:
+		// chunks reached only by a static `import` inside a lazy chunk, which
+		// have no HTML element of their own and cannot be annotated at the
+		// import site (there is no syntax for it). Manufacturing a
+		// <link rel="modulepreload" integrity> is the only build-time way to
+		// attach a hash to that fetch. Cost: those chunks are fetched eagerly.
+		const preloadFiles =
+			this.config.importMapIntegrity === false
+				? new Set([
+					...dynamicChunkFiles,
+					...collectModuleChunkFiles(
+						sriByPathname,
+						this.config.skipResources,
+						redundantImportMapChunks
+					).map((f) => f.fileName),
+				])
+				: dynamicChunkFiles;
+
+		if (this.config.preloadDynamicChunks && preloadFiles.size > 0) {
 			processedHtml = await this.addDynamicChunkPreloads(
 				processedHtml,
-				dynamicChunkFiles,
-				sriByPathname
+				preloadFiles,
+				sriByPathname,
+				fileName
 			);
 		}
 
@@ -1808,13 +1907,18 @@ export class HtmlProcessor {
 		// ========================================================================
 
 		// Step 3: Inject import map integrity (runs after preload injection so
-		// the unshift places the map BEFORE the modulepreload links).
-		processedHtml = this.injectImportMap(
-			processedHtml,
-			sriByPathname,
-			fileName,
-			redundantImportMapChunks
-		);
+		// the unshift places the map BEFORE the modulepreload links). Skipped
+		// entirely when the inline-script channel is disabled — a strict CSP
+		// without 'unsafe-inline' blocks the map, and a blocked map silently
+		// delivers no integrity at all.
+		if (this.config.importMapIntegrity !== false) {
+			processedHtml = this.injectImportMap(
+				processedHtml,
+				sriByPathname,
+				fileName,
+				redundantImportMapChunks
+			);
+		}
 
 		// ========================================================================
 		// BUNDLE UPDATE
@@ -1907,7 +2011,8 @@ export class HtmlProcessor {
 	private async addDynamicChunkPreloads(
 		htmlContent: string,
 		dynamicChunkFiles: Set<string>,
-		sriByPathname: Record<string, string>
+		sriByPathname: Record<string, string>,
+		htmlFileName: string
 	): Promise<string> {
 		try {
 			// ====================================================================
@@ -1940,7 +2045,12 @@ export class HtmlProcessor {
 			// Process each dynamic chunk file
 			for (const chunkFile of dynamicChunkFiles) {
 				if (
-					this.addPreloadLinkForChunk(head, chunkFile, sriByPathname)
+					this.addPreloadLinkForChunk(
+						head,
+						chunkFile,
+						sriByPathname,
+						htmlFileName
+					)
 				) {
 					addedCount++;
 				}
@@ -1989,14 +2099,17 @@ export class HtmlProcessor {
 	private addPreloadLinkForChunk(
 		head: Element,
 		chunkFile: string,
-		sriByPathname: Record<string, string>
+		sriByPathname: Record<string, string>,
+		htmlFileName: string
 	): boolean {
 		// ========================================================================
 		// HREF GENERATION AND DUPLICATE CHECKING
 		// ========================================================================
 
-		// Build absolute href using base path
-		const href = joinBaseHref(this.config.base, chunkFile);
+		// Build the href for THIS document — a relative base resolves against
+		// the document's own URL, so a page in a subdirectory needs a different
+		// string than one at the output root.
+		const href = preloadHref(this.config.base, chunkFile, htmlFileName);
 
 		// Check if preload link already exists (duplicate prevention)
 		const existingPreloads = findElements(head, (el) => {
@@ -2012,6 +2125,16 @@ export class HtmlProcessor {
 		// ========================================================================
 		// INTEGRITY VALIDATION
 		// ========================================================================
+
+		// Honour the user's opt-out. collectModuleChunkFiles already filters the
+		// widened set, but dynamicChunkFiles comes straight from the chunk graph
+		// and has no skipResources awareness — without this check a skipped
+		// chunk that happens to be a dynamic import target would still be
+		// preloaded with an integrity attribute, silently overriding an explicit
+		// exclusion that the import map channel honours.
+		if (isSkippedResource(chunkFile, this.config.skipResources)) {
+			return false;
+		}
 
 		// Get integrity for this chunk
 		const integrity = sriByPathname[path.posix.join("/", chunkFile)];

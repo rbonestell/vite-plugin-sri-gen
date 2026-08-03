@@ -3096,3 +3096,430 @@ describe("import map SRI", () => {
 		expect(mapIdx).toBeLessThan(titleIdx);
 	});
 });
+
+describe("importMapIntegrity: CSP-safe coverage without an inline script", () => {
+	// Reproduces the reported topology: a lazy route chunk reached by import(),
+	// which in turn statically imports a leaf chunk. The leaf has no HTML
+	// element of its own, so today only the import map covers it.
+	function makeGapBundle(): Record<string, Chunk | Asset> {
+		return {
+			"index.html": {
+				type: "asset",
+				source:
+					'<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head><body></body></html>',
+			},
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js'); console.log(p);",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": {
+				type: "chunk",
+				fileName: "assets/lazy.js",
+				code: "import './dep.js'; export default 1",
+				imports: ["src/dep.ts"],
+				dynamicImports: [],
+				modules: { "src/lazy.ts": {} },
+				name: "lazy",
+				facadeModuleId: "src/lazy.ts",
+			},
+			"assets/dep.js": {
+				type: "chunk",
+				fileName: "assets/dep.js",
+				code: "export const dep = 42",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/dep.ts": {} },
+				name: "dep",
+				facadeModuleId: "src/dep.ts",
+			},
+		} as any;
+	}
+
+	it("covers statically-imported lazy dependencies with a modulepreload link", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		expect(html).toMatch(
+			/<link rel="modulepreload" href="\/assets\/dep\.js" integrity="sha256-[^"]+"/
+		);
+	});
+
+	it("emits no inline import map script when disabled", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		expect(html).not.toContain("importmap");
+	});
+
+	it("keeps the import map and narrow preloads when left at its default", async () => {
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		expect(html).toContain('type="importmap"');
+		expect(html).toContain("/assets/dep.js");
+		// Regression guard: the default must not start eagerly preloading leaves.
+		expect(html).not.toMatch(
+			/<link rel="modulepreload" href="\/assets\/dep\.js"/
+		);
+	});
+
+	it("makes JS-level import() enforcement reachable once the map is off", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			preloadDynamicChunks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+
+		const entryCode = (bundle["assets/entry.js"] as Chunk).code;
+		expect(entryCode).toContain("enforceDynamicImports: true");
+		expect(entryCode).toContain("__sriImport(import.meta.url, './lazy.js')");
+	});
+
+	it("does not warn once the widened preload set already covers the graph", async () => {
+		// preloadDynamicChunks left at its default (true)
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(
+			mockContext,
+			{},
+			makeGapBundle() as any
+		);
+
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
+	it("counts only chunks the import() rewrite cannot reach", async () => {
+		// entry -> import() -> lazy.js -> static import -> dep.js
+		// The rewrite covers lazy.js, so only dep.js is genuinely unverified.
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			preloadDynamicChunks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(
+			mockContext,
+			{},
+			makeGapBundle() as any
+		);
+
+		expect(mockContext.warn).toHaveBeenCalledWith(
+			expect.stringContaining("1 module-graph chunk(s)")
+		);
+	});
+
+	it("counts dynamic chunks too when the rewrite is disabled", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			preloadDynamicChunks: false,
+			runtimePatchDynamicLinks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(
+			mockContext,
+			{},
+			makeGapBundle() as any
+		);
+
+		expect(mockContext.warn).toHaveBeenCalledWith(
+			expect.stringContaining("2 module-graph chunk(s)")
+		);
+	});
+
+	it("warns when no channel is left to carry module-graph integrity", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			preloadDynamicChunks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(
+			mockContext,
+			{},
+			makeGapBundle() as any
+		);
+
+		expect(mockContext.warn).toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
+	it("propagates crossorigin onto widened preload links", async () => {
+		// SRI on a cross-origin fetch requires CORS, so the attribute must
+		// reach the links added by the widened set, not just the narrow one.
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			crossorigin: "anonymous",
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		expect(html).toMatch(
+			/<link rel="modulepreload" href="\/assets\/dep\.js" integrity="sha256-[^"]+" crossorigin="anonymous">/
+		);
+	});
+
+	it("keeps skipResources opt-outs out of the widened preload set", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			skipResources: ["**/dep.js"],
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		expect(html).not.toContain("/assets/dep.js");
+	});
+});
+
+describe("no-channel warning", () => {
+	it("stays quiet for a single-bundle build with no module-graph chunks", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+			preloadDynamicChunks: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		const bundle: any = {
+			"index.html": {
+				type: "asset",
+				source:
+					'<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head><body></body></html>',
+			},
+			"assets/entry.js": makeEntryChunk({ code: "console.log('only')" }),
+		};
+
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+});
+
+describe("relative base preload hrefs resolve against the document", () => {
+	function nestedBundle(): any {
+		return {
+			"index.html": {
+				type: "asset",
+				source:
+					'<!doctype html><html><head><script type="module" src="./assets/entry.js"></script></head><body></body></html>',
+			},
+			"admin/index.html": {
+				type: "asset",
+				source:
+					'<!doctype html><html><head><script type="module" src="../assets/entry.js"></script></head><body></body></html>',
+			},
+			"assets/entry.js": {
+				type: "chunk",
+				fileName: "assets/entry.js",
+				code: "import './dep.js'; console.log(1)",
+				imports: ["src/dep.ts"],
+				dynamicImports: [],
+				modules: { "src/entry.ts": {} },
+				name: "entry",
+				isEntry: true,
+				facadeModuleId: "src/entry.ts",
+			},
+			"assets/dep.js": {
+				type: "chunk",
+				fileName: "assets/dep.js",
+				code: "export const d = 1",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/dep.ts": {} },
+				name: "dep",
+				facadeModuleId: "src/dep.ts",
+			},
+		};
+	}
+
+	it("prefixes ../ for HTML emitted into a subdirectory", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const bundle = nestedBundle();
+		await plugin.generateBundle.handler({}, bundle);
+
+		expect(String(bundle["admin/index.html"].source)).toMatch(
+			/<link rel="modulepreload" href="\.\.\/assets\/dep\.js" integrity="sha256-/
+		);
+	});
+
+	it("keeps root-level HTML pointing at its own directory", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const bundle = nestedBundle();
+		await plugin.generateBundle.handler({}, bundle);
+
+		expect(String(bundle["index.html"].source)).toMatch(
+			/<link rel="modulepreload" href="\.\/assets\/dep\.js" integrity="sha256-/
+		);
+	});
+
+	it("leaves root-relative and absolute bases document-independent", async () => {
+		for (const base of ["/", "https://cdn.example.com/"]) {
+			const plugin = sri({
+				algorithm: "sha256",
+				importMapIntegrity: false,
+			}) as any;
+			plugin.configResolved?.({ base, build: { ssr: false } } as any);
+
+			const bundle = nestedBundle();
+			await plugin.generateBundle.handler({}, bundle);
+
+			const expected = `href="${base === "/" ? "/assets/dep.js" : "https://cdn.example.com/assets/dep.js"}"`;
+			expect(String(bundle["index.html"].source)).toContain(expected);
+			expect(String(bundle["admin/index.html"].source)).toContain(expected);
+		}
+	});
+});
+
+describe("silent-gap detection at stock defaults", () => {
+	function relativeBaseGraph(): any {
+		return {
+			"index.html": {
+				type: "asset",
+				source:
+					'<!doctype html><html><head><script type="module" src="./assets/entry.js"></script></head><body></body></html>',
+			},
+			"assets/entry.js": {
+				type: "chunk",
+				fileName: "assets/entry.js",
+				code: "import('./lazy.js')",
+				imports: [],
+				dynamicImports: ["src/lazy.ts"],
+				modules: { "src/entry.ts": {} },
+				name: "entry",
+				isEntry: true,
+				facadeModuleId: "src/entry.ts",
+			},
+			"assets/lazy.js": {
+				type: "chunk",
+				fileName: "assets/lazy.js",
+				code: "import './dep.js'; export const l = 1",
+				imports: ["src/dep.ts"],
+				dynamicImports: [],
+				modules: { "src/lazy.ts": {} },
+				name: "lazy",
+				facadeModuleId: "src/lazy.ts",
+			},
+			"assets/dep.js": {
+				type: "chunk",
+				fileName: "assets/dep.js",
+				code: "export const d = 1",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/dep.ts": {} },
+				name: "dep",
+				facadeModuleId: "src/dep.ts",
+			},
+		};
+	}
+
+	it("warns about a relative-base gap even with every option untouched", async () => {
+		// No import map (relative base), narrow preloads only, no rewrite —
+		// dep.js reaches the browser unverified and used to do so in silence.
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(
+			mockContext,
+			{},
+			relativeBaseGraph()
+		);
+
+		expect(mockContext.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/dep.js")
+		);
+	});
+
+	it("goes quiet on a relative-base build once the widened set is enabled", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const mockContext = createMockPluginContext();
+		const bundle = relativeBaseGraph();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+		expect(String(bundle["index.html"].source)).toContain(
+			'href="./assets/dep.js"'
+		);
+	});
+
+	it("drops a skipResources chunk from preloads even when dynamically imported", async () => {
+		const plugin = sri({
+			algorithm: "sha256",
+			skipResources: ["**/lazy.js"],
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = relativeBaseGraph();
+		bundle["index.html"].source =
+			'<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head><body></body></html>';
+		await plugin.generateBundle.handler({}, bundle);
+
+		expect(String(bundle["index.html"].source)).not.toContain(
+			'href="/assets/lazy.js"'
+		);
+	});
+});

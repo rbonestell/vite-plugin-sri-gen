@@ -38,10 +38,22 @@ If your HTML already declares a `<script type="importmap">`, the plugin merges i
 
 ## CSP Considerations
 
-Import maps are necessarily inline — the HTML spec does not allow a `src` attribute on `<script type="importmap">`. A strict `Content-Security-Policy` with `script-src` that excludes `'unsafe-inline'` must permit the map via either:
+Import maps are necessarily inline — the HTML spec does not allow a `src` attribute on `<script type="importmap">`, and external import maps have never shipped in any browser. A strict `Content-Security-Policy` with `script-src` that excludes `'unsafe-inline'` will block the map.
 
-- **A nonce** — your server templating injects a fresh nonce into both the CSP header and the `<script>` tag. This is the recommended approach.
-- **A hash** — the browser can hash the inline script and match it against a `script-src` hash value. Note that the import map's content includes chunk content hashes, so it changes on every build. Automating hash extraction and CSP header updates is required.
+**The failure is silent.** The injected map has no `imports` key, only `integrity`, so module resolution never depended on it — the app loads exactly as before. All that is lost is SRI on the chunks the map alone covered.
+
+The direct fix is to stop using the inline channel:
+
+```ts
+sri({ importMapIntegrity: false })
+```
+
+The plugin then emits no inline script and delivers the same hashes as `<link rel="modulepreload" integrity=...>`, which `script-src` does not govern. Coverage is preserved, including the static-import chunks the map used to cover alone — provided `preloadDynamicChunks` stays at its default `true`, since that is the channel the hashes move to. See [`importMapIntegrity`](/configure/options#importmapintegrity) for the eager-fetch tradeoff and multi-page considerations.
+
+To keep the map instead, permit it via:
+
+- **A nonce** — your server templating injects a fresh nonce into both the CSP header and the `<script>` tag. Nothing to update after a build.
+- **A hash** — the browser hashes the inline script and matches it against a `script-src` hash value. The map contains chunk content hashes, so it changes every build; hash extraction and CSP header updates must be automated in your deploy pipeline.
 
 If your build has no code splitting, none of this applies — see above, no import map is injected in the first place, so there's nothing to whitelist.
 
@@ -50,6 +62,8 @@ If your build has no code splitting, none of this applies — see above, no impo
 - **Workers and Service Workers** — import maps do not apply inside Web Workers or Service Workers. Module chunks loaded there are not covered by the import map, and the JS-runtime fallback does not cover them either. See [Limitations](/troubleshoot/limitations).
 
 - **Relative `base`** — with `base: './'`, `''`, or any `'../…'` value, import map keys cannot be expressed portably (keys resolve against each document's URL and differ per page). Injection is skipped for relative base configurations. The JS-runtime fallback remains active for `preloadDynamicChunks: false` builds. See [Coverage Strategies](/learn/coverage-strategies) for the full decision tree.
+
+  With no map and only the default narrow preloads, a chunk reached solely by a static `import` inside a lazy chunk is left unverified — the JS-runtime fallback hooks `import()` call sites and a static import is not one. The build warns and names the affected chunks. Setting [`importMapIntegrity: false`](/configure/options#importmapintegrity) closes this: the widened modulepreload set is base-shape agnostic, so it works for relative bases even though the option is framed around CSP.
 
 - **`skipResources` patterns** — resources excluded via `skipResources` are also excluded from the import map. The opt-out applies to native module-fetch enforcement as well.
 
