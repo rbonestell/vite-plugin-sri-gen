@@ -2457,17 +2457,15 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(typeof sandbox.__sriImport).toBe("function");
 	});
 
-	it("installs globalThis.__sriImport from the real runtime when enforcement is enabled", async () => {
+	it("installs globalThis.__sriImport from the real runtime when enforcement is enabled", () => {
 		// Positive/smoke test for the real runtime. Note: vitest transforms `src`
 		// without esbuild's keepNames, so the real `installSriRuntime.toString()`
 		// here contains no `__name`; this test therefore passes with or without
 		// the shim. The preceding test (synthetic `__name`) is the actual
 		// regression guard for issue #30.
 		//
-		// It also exercises the minified runtime end to end: a minifier that
-		// hoisted a helper out of the serialized function would leave the
-		// reference dangling here, so this doubles as the self-containment guard
-		// for issue #45's minification step.
+		// This passes the runtime unminified; the minified path is covered by the
+		// "after minification" tests below.
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/chunk.js": "sha384-abc" },

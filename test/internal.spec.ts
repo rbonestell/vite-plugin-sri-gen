@@ -6158,6 +6158,24 @@ describe("minifyRuntimeSource (issue #45: injected runtime ships minified)", () 
 		);
 	});
 
+	it("keeps the original source when minifySync reports errors alongside code", async () => {
+		// minifySync does not throw on failure — it returns an `errors` array and
+		// still populates `code`. Trusting `code` there ships partial output.
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(SOURCE, logger, () =>
+			Promise.resolve({
+				minifySync: () => ({
+					code: "function broken(",
+					errors: ["Unexpected end of file"],
+				}),
+			})
+		);
+		expect(out).toBe(SOURCE);
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringContaining("Unexpected end of file")
+		);
+	});
+
 	it("tolerates a minifier that returns no code", async () => {
 		const out = await minifyRuntimeSource(SOURCE, undefined, () =>
 			Promise.resolve({ minifySync: () => undefined })

@@ -2633,7 +2633,7 @@ export interface ViteMinifiers {
 	minifySync?: (
 		filename: string,
 		source: string
-	) => { code: string } | undefined;
+	) => { code: string; errors?: unknown[] } | undefined;
 	/** Vite 4-7: esbuild, which those versions depend on directly. */
 	transformWithEsbuild?: (
 		source: string,
@@ -2743,7 +2743,19 @@ export async function minifyRuntimeSource(
 		let minified: string | undefined;
 
 		if (typeof vite.minifySync === "function") {
-			minified = vite.minifySync(RUNTIME_FILENAME, source)?.code;
+			// minifySync reports failures in an `errors` array rather than
+			// throwing, and still returns a `code` field alongside it. Treating
+			// that as success would ship whatever partial output it produced.
+			const result = vite.minifySync(RUNTIME_FILENAME, source);
+			if (result?.errors?.length) {
+				logger?.info(
+					`SRI runtime minification skipped: ${String(
+						result.errors[0]
+					)}`
+				);
+				return source;
+			}
+			minified = result?.code;
 		} else if (typeof vite.transformWithEsbuild === "function") {
 			minified = (
 				await vite.transformWithEsbuild(source, RUNTIME_FILENAME, {
