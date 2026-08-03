@@ -48,7 +48,11 @@ export default defineConfig({
 })
 ```
 
-Every emitted HTML file — `index.html`, `about/index.html`, and `admin/index.html` — receives SRI attributes. Each page's static tags are hashed independently; the import map and any injected modulepreload links reflect the chunks that page actually loads.
+Every emitted HTML file — `index.html`, `about/index.html`, and `admin/index.html` — receives SRI attributes. Each page's static tags are hashed independently.
+
+::: warning Injected coverage is bundle-wide, not per-page
+The import map and any injected modulepreload links are computed once for the whole bundle and written into every page, so each HTML file declares hashes for chunks that only other pages load. For the import map this costs a few extra bytes in an inline script. If you set [`importMapIntegrity: false`](/configure/options#importmapintegrity), those same entries become `<link rel="modulepreload">` tags, and extra entries become real network fetches — every page eagerly downloads every other page's private dependency graph. On an MPA with large, independent per-page graphs, measure before adopting it.
+:::
 
 ## Further Reading
 

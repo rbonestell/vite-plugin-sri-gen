@@ -37,6 +37,8 @@ See [Import Map Integrity](/integrate/import-map) for additional context on this
 
 ::: tip Broad coverage without import map integrity
 Keeping `preloadDynamicChunks: true` and `runtimePatchDynamicLinks: true` (both defaults) gives older browsers meaningful SRI coverage through modulepreload and runtime patching even without import map integrity support.
+
+For the strongest coverage on older browsers, set [`importMapIntegrity: false`](/configure/options#importmapintegrity). It moves every module-graph hash onto `<link rel="modulepreload" integrity=...>` tags, which all SRI-capable browsers enforce — so chunks that would otherwise depend on import map support, including those reached only by a static `import` inside a lazy chunk, are verified everywhere. The cost is eager fetching; see the option reference for the tradeoff.
 :::
 
 See [Import Map Integrity](/integrate/import-map) for the full browser support table and progressive-enhancement model.

@@ -74,6 +74,7 @@ Typical resources to exclude:
 A `skipResources` exclusion is applied consistently across every mechanism the plugin uses. A skipped resource receives no integrity attribute in:
 
 - **Static HTML tags** — `<script>`, `<link rel="stylesheet">`, `<link rel="modulepreload">` found in your HTML at build time
+- **Injected modulepreload links** — a skipped chunk gets no `<link rel="modulepreload">` of its own, whether it reached the preload set as a dynamic import target or through the widened set of [`importMapIntegrity: false`](/configure/options#importmapintegrity)
 - **The import map** — the `integrity` object inside the injected `<script type="importmap">` (see [Import Map Integrity](/integrate/import-map))
 - **Runtime patching** — the built-in integrity map passed to the injected runtime, so dynamically created elements for skipped resources are also left alone (see [Runtime Patching](/integrate/runtime-patching))
 - **Manifest entries** — the `integrity` and `cssIntegrity` fields added to Vite manifest entries (see [Backend-Owned HTML (Manifest)](/integrate/backend-manifest))
