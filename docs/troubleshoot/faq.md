@@ -28,10 +28,22 @@ To add SRI to the HTML your server renders at request time, use the manifest int
 
 Import maps are necessarily inline — the HTML spec does not allow a `src` attribute on `<script type="importmap">`. A strict `Content-Security-Policy` with a `script-src` directive that excludes `'unsafe-inline'` will block the injected map.
 
-Two approaches work:
+Watch for this, because **nothing appears broken when it happens**. The injected map has no `imports` key — only `integrity` — so module resolution never depended on it and your app loads normally. What is silently lost is SRI on every chunk the map was the only cover for.
 
-- **Nonce** — your server templating injects a fresh nonce into both the `script-src` CSP header and the `<script type="importmap">` tag on every response. This is the recommended approach. The nonce changes per request, so there's nothing to update after a build.
-- **Hash** — the browser matches the inline script against a `script-src` hash value. Because the import map contains chunk content hashes, its content changes on every build. You'll need to automate hash extraction from the built HTML and CSP header updates as part of your deploy pipeline.
+The simplest fix needs no CSP cooperation at all:
+
+```ts
+sri({ importMapIntegrity: false })
+```
+
+No inline script is emitted, and the same hashes ship as `<link rel="modulepreload" integrity=...>` instead. Coverage is preserved as long as `preloadDynamicChunks` stays at its default `true` — see [`importMapIntegrity`](/configure/options#importmapintegrity) for the mechanics and the eager-fetch tradeoff.
+
+If you would rather keep the map, you must get it past `script-src` yourself:
+
+- **Nonce** — your server templating injects a fresh nonce into both the `script-src` CSP header and the `<script type="importmap">` tag on every response. The nonce changes per request, so there's nothing to update after a build.
+- **Hash** — the browser matches the inline script against a `script-src` hash value. Because the map contains chunk content hashes, its content changes on every build, so hash extraction and CSP header updates have to be automated in your deploy pipeline.
+
+To catch a gap like this the day it appears rather than months later, deploy `Integrity-Policy-Report-Only: blocked-destinations=(script)`. It reports any script fetch that carries no integrity metadata, which is exactly the failure mode a blocked import map produces.
 
 See [Import Map Integrity](/integrate/import-map) for full CSP details.
 

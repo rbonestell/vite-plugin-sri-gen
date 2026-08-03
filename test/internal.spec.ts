@@ -18,6 +18,7 @@ import {
 	isHttpUrl,
 	isImportMapCapableBase,
 	buildImportIntegrityObject,
+	collectModuleChunkFiles,
 	joinBaseHref,
 	loadResource,
 	ManifestProcessor,
@@ -5984,5 +5985,34 @@ describe("Coverage Gap Closures", () => {
 				/no integrity registered for \.\/asset\.js \(resolved to https:\/\/app\.test\/assets\/js\/asset\.js\)/i
 			);
 		});
+	});
+});
+
+describe("collectModuleChunkFiles", () => {
+	const sriByPathname = {
+		"/assets/dep.js": "sha256-dep",
+		"/assets/app.mjs": "sha256-app",
+		"/assets/style.css": "sha256-css",
+	};
+
+	it("returns only JS module chunks", () => {
+		const files = collectModuleChunkFiles(sriByPathname).map((f) => f.fileName);
+		expect(files).toEqual(["assets/dep.js", "assets/app.mjs"]);
+	});
+
+	it("honours skipResources and tag-covered exclusions", () => {
+		const files = collectModuleChunkFiles(
+			sriByPathname,
+			["**/dep.js"],
+			new Set(["assets/app.mjs"])
+		);
+		expect(files).toEqual([]);
+	});
+
+	it("still yields chunks for a relative base that cannot produce import map keys", () => {
+		// modulepreload hrefs resolve against the document URL, so a relative
+		// base is usable here even though it yields no valid import map.
+		expect(buildImportIntegrityObject(sriByPathname, "./")).toBeNull();
+		expect(collectModuleChunkFiles(sriByPathname).length).toBe(2);
 	});
 });

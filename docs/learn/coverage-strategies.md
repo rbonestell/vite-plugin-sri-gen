@@ -34,6 +34,18 @@ If your HTML already includes a `<script type="importmap">`, the plugin merges i
 
 See [import map integrity](/integrate/import-map) for CSP implications, Worker caveats, and behavior with `base: './'`.
 
+### When the map is unavailable (`importMapIntegrity: false`)
+
+Import maps must be inline, so a `script-src` without `'unsafe-inline'`, a nonce, or a matching hash blocks the map — and does so silently, since the map carries only `integrity` and nothing depends on it for resolution.
+
+The same option helps whenever the map is unavailable for *any* reason, not just CSP. A **relative `base`** also skips map injection, which leaves statically-imported sub-dependencies of lazy chunks uncovered at otherwise-default settings. The widened preload set is base-shape agnostic, so `importMapIntegrity: false` closes that gap too.
+
+Setting `importMapIntegrity: false` moves the same hashes to the other channel: no inline script is emitted, and modulepreload injection widens from "dynamically imported chunks" to the whole module graph. That matters because the widened set is what closes the gap. A chunk reached only by a static `import` inside a lazy chunk has no HTML element of its own, and there is no syntax to annotate an `import` statement with a hash — manufacturing a `<link rel="modulepreload" integrity=...>` is the only build-time way to attach one to that fetch. Neither the import map nor the `import()` rewrite is a substitute: the rewrite hooks call sites, and a static import is not a call site.
+
+This requires `preloadDynamicChunks` to stay at its default `true` — it is the channel the hashes move to. With both disabled there is no channel left for statically-imported chunks, and the build warns with a count.
+
+The cost is eager fetching. On a single-page app the increment is small, since `preloadDynamicChunks` already preloads the lazy chunks themselves; what is added is their private dependencies. On a **multi-page** build, note that the set is computed per bundle rather than per page, so each HTML file gets preload links for every module-graph chunk in the build — including chunks private to other pages. The import map always had the same bundle-wide scope, but as inert bytes rather than fetches.
+
 ## Modulepreload Injection (`preloadDynamicChunks`)
 
 **Default: enabled.**
@@ -69,6 +81,7 @@ This path activates only when **all three** of the following are true:
    - There is no HTML in the bundle (backend-owned HTML reading `manifest.json`)
    - A manifest is emitted alongside HTML (the manifest consumer's server-rendered pages have no import map)
    - `base` is relative (`'./'`, `''`, `'../…'`)
+   - `importMapIntegrity` is `false` (no map is emitted at all, so it covers nothing)
 3. `runtimePatchDynamicLinks` is `true` (required, as it installs the verifier function)
 
 In this scenario, every `import(...)` call site in the bundle is rewritten to `__sriImport(import.meta.url, ...)`. The injected `__sriImport` helper fetches the chunk, verifies its hash against the build-time integrity map using `crypto.subtle`, and only then performs the native `import()`. A hash mismatch throws and aborts module loading.
@@ -89,8 +102,12 @@ Builds that are fully covered by the import map have none of these constraints. 
 flowchart TD
     A([Build complete]) --> B{HTML emitted\nin bundle?}
     B -- no --> C[Manifest augmentation only\nno HTML-side mechanisms]
-    B -- yes --> D{base is root-relative\nor absolute URL?}
-    D -- no\nrelative base --> E[Static tag SRI ✓\nImport map: skipped\nRuntime patching active if enabled]
+    B -- yes --> IM{importMapIntegrity?}
+    IM -- false\nstrict CSP --> R{preloadDynamicChunks?}
+    R -- true\ndefault --> Q[Static tag SRI ✓\nNo inline script emitted\nModulepreload covers the\nfull module graph ✓]
+    R -- false --> S[No channel for chunks reached\nonly by a static import\nBuild warns]
+    IM -- true\ndefault --> D{base is root-relative\nor absolute URL?}
+    D -- no\nrelative base --> E[Static tag SRI ✓\nImport map: skipped\nStatic-import chunks uncovered\nBuild warns — set importMapIntegrity: false]
     D -- yes --> O{Any chunks reached\nvia the module graph?}
     O -- no\nsingle bundle, no\ncode splitting --> P[Static tag SRI ✓\nImport map: skipped\nno redundant coverage needed]
     O -- yes --> F[Static tag SRI ✓\nImport map integrity ✓]
@@ -106,7 +123,7 @@ flowchart TD
     classDef terminal fill:#16132a,stroke:#2dd4bf,color:#ccfbf1
     classDef decision fill:#16132a,stroke:#fbbf24,color:#fef3c7
     class A terminal
-    class B,D,G,I,L,O decision
+    class B,D,G,I,L,O,IM,R decision
 ```
 
 ## Comparison
@@ -114,7 +131,8 @@ flowchart TD
 | Mechanism | What it covers | Browser support | Enabled by |
 | --- | --- | --- | --- |
 | Static tag SRI | `<script>`, `<link rel="stylesheet">`, `<link rel="modulepreload">` in HTML | All SRI-supporting browsers | Always on (HTML in bundle) |
-| import map integrity | Module fetches for chunks reached via the module graph (static/dynamic import) — excludes chunks already covered by a tag's own `integrity` | Chrome 127+, Firefox 138+, Safari 18+ | HTML in bundle + root-relative/absolute `base`; skipped entirely for single-bundle builds with no code splitting |
+| import map integrity | Module fetches for chunks reached via the module graph (static/dynamic import) — excludes chunks already covered by a tag's own `integrity` | Chrome 127+, Firefox 138+, Safari 18+ | `importMapIntegrity: true` (default) + HTML in bundle + root-relative/absolute `base`; skipped entirely for single-bundle builds with no code splitting |
 | Modulepreload injection | Dynamically imported chunks (via preload + native SRI) | All SRI-supporting browsers | `preloadDynamicChunks: true` (default) |
+| Modulepreload injection, widened | The whole module graph, including chunks reached only by a static `import` inside a lazy chunk | All SRI-supporting browsers | `importMapIntegrity: false` **+** `preloadDynamicChunks: true` (default) — the strict-CSP path, replaces the import map |
 | Runtime patching | Dynamically created `<script>`/`<link>` elements | All browsers (JS-based) | `runtimePatchDynamicLinks: true` (default) |
 | JS `import()` rewriting | Dynamic `import()` call sites | All browsers with `crypto.subtle` (secure context) | Auto when `preloadDynamicChunks: false` + import map insufficient |

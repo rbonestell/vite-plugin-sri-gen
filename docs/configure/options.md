@@ -12,6 +12,7 @@ interface SriPluginOptions {
   crossorigin?: 'anonymous' | 'use-credentials'
   fetchCache?: boolean
   fetchTimeoutMs?: number
+  importMapIntegrity?: boolean
   preloadDynamicChunks?: boolean
   runtimePatchDynamicLinks?: boolean
   skipResources?: string[]
@@ -27,6 +28,7 @@ interface SriPluginOptions {
 | `crossorigin` | `'anonymous' \| 'use-credentials'` | `undefined` | CORS attribute added to integrity-enabled elements |
 | `fetchCache` | `boolean` | `true` | Cache remote fetches in-memory and deduplicate concurrent requests |
 | `fetchTimeoutMs` | `number` | `5000` | Abort remote fetches after N ms; `0` disables the timeout |
+| `importMapIntegrity` | `boolean` | `true` | Deliver module-graph integrity via an inline `<script type="importmap">`. Set `false` for a strict CSP with no `'unsafe-inline'` |
 | `preloadDynamicChunks` | `boolean` | `true` | Inject `<link rel="modulepreload" integrity=...>` for dynamically imported chunks |
 | `runtimePatchDynamicLinks` | `boolean` | `true` | Prepend a small runtime to entry chunks that adds integrity to dynamically created elements |
 | `skipResources` | `string[]` | `[]` | Patterns (exact or glob) matched against element `id`, `src`, or `href`; matching resources are excluded from SRI |
@@ -128,6 +130,41 @@ export default {
 ```
 
 See [Networking](/configure/networking) for more detail on timeout behavior.
+
+## `importMapIntegrity`
+
+Controls whether module-graph integrity is delivered through an inline `<script type="importmap">`.
+
+**Default:** `true`
+
+Import maps must be inline — the HTML spec forbids `src` on `<script type="importmap">`, and external import maps have never shipped in any browser. So a `Content-Security-Policy` whose `script-src` omits `'unsafe-inline'` blocks the injected map. Nothing appears broken when this happens: the map carries only an `integrity` key, so module resolution never depended on it. What is lost, silently, is SRI on every chunk the map was the only cover for.
+
+Set this to `false` when your CSP does not permit inline scripts:
+
+```ts
+// vite.config.ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  plugins: [
+    sri({
+      // No inline script is emitted; the same hashes ship as
+      // <link rel="modulepreload" integrity=...> instead.
+      importMapIntegrity: false,
+    }),
+  ],
+}
+```
+
+Coverage is preserved rather than reduced, **provided `preloadDynamicChunks` stays at its default `true`** — that is the channel the hashes move to. With the map disabled, modulepreload injection widens from "dynamically imported chunks" to the whole module graph, so chunks reached only by a static `import` inside a lazy chunk — which have no HTML element of their own and cannot be annotated at the import site — stay verified. `importMapIntegrity: false` + `preloadDynamicChunks: true` is the one configuration that satisfies a strict CSP with no gaps and no server coordination.
+
+Turning both off leaves chunks reached only by a static import with no channel at all. The `import()` rewrite is not a substitute — it hooks call sites, and a static import is not a call site. The build warns when this would actually leave chunks uncovered, naming the count.
+
+The tradeoff is eager fetching: those chunks are downloaded when the HTML is parsed rather than when the lazy route needs them.
+
+**Single-page apps.** The increment is usually modest, because `preloadDynamicChunks` (on by default) already preloads the lazy chunks themselves; what gets added is their private dependencies.
+
+**Multi-page apps.** The widened set is computed per bundle, not per page, so every emitted HTML file receives preload links for every module-graph chunk in the build — including chunks private to other pages. The import map has always had this same bundle-wide scope, but as inert bytes in an inline script; as preload links it becomes real network fetches. On an MPA with large, independent per-page graphs, measure before adopting.
 
 ## `preloadDynamicChunks`
 

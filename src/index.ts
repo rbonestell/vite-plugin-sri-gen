@@ -8,6 +8,7 @@ type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
 type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
+	collectModuleChunkFiles,
 	createLogger,
 	DynamicImportAnalyzer,
 	escapeForScript,
@@ -35,6 +36,32 @@ export interface SriPluginOptions {
 	fetchTimeoutMs?: number;
 	/** Add rel="modulepreload" with integrity for discovered dynamic chunks. Default: true */
 	preloadDynamicChunks?: boolean;
+	/**
+	 * Deliver module-graph integrity via an inline `<script type="importmap">`.
+	 * Default: true.
+	 *
+	 * Import maps must be inline — the HTML spec forbids `src` on
+	 * `<script type="importmap">` — so a `script-src` without `'unsafe-inline'`,
+	 * a matching hash, or a nonce will block the map. A blocked map delivers no
+	 * integrity, silently.
+	 *
+	 * Set to false for strict-CSP deployments: no inline script is emitted, and
+	 * the same hashes are delivered as `<link rel="modulepreload" integrity>`
+	 * instead, which needs no CSP cooperation. Coverage is preserved — the
+	 * preload set widens to the full module graph so chunks reached only by a
+	 * static import inside a lazy chunk stay verified. Those chunks are then
+	 * fetched eagerly rather than on demand.
+	 *
+	 * Requires `preloadDynamicChunks` (the default) to remain enabled — that is
+	 * the channel the hashes move to. With both off, chunks reached only by a
+	 * static import inside a lazy chunk have no channel at all and the build
+	 * warns.
+	 *
+	 * The widened set is bundle-wide, not per page, so in a multi-page build
+	 * every HTML file preloads every module-graph chunk, including chunks
+	 * private to other pages.
+	 */
+	importMapIntegrity?: boolean;
 	/** Inject a tiny runtime that sets integrity on dynamically inserted <script>/<link>. Default: true */
 	runtimePatchDynamicLinks?: boolean;
 	/** Skip SRI generation for resources matching these patterns. Supports exact matches and simple glob patterns with '*'. */
@@ -153,6 +180,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 		: undefined;
 	let isSSR = false;
 	const preloadDynamicChunks = options.preloadDynamicChunks !== false; // default true
+	const importMapIntegrity = options.importMapIntegrity !== false; // default true
 	const runtimePatchDynamicLinks = options.runtimePatchDynamicLinks !== false; // default true
 	const skipResources = options.skipResources ?? []; // default empty array
 	const verboseLogging = options.verboseLogging === true; // default false
@@ -272,6 +300,23 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					//   2) Inject runtime into entry chunks
 					//   3) Hash entry chunks (now includes the injected runtime)
 					// - When disabled, we can hash everything in a single pass for efficiency
+
+					// Whether the import map can cover every consumer of this
+					// bundle. It cannot when there is no HTML in the bundle
+					// (backend-owned HTML / manifest consumers), when a manifest
+					// is emitted ALONGSIDE HTML (the manifest consumer's
+					// server-rendered pages have no import map), when base is
+					// relative (no valid import map keys), or when the user
+					// disabled the inline-script channel outright (strict CSP),
+					// in which case no map is emitted at all.
+					const importMapCapable =
+						importMapIntegrity &&
+						hasHtmlFiles &&
+						!hasManifestFiles &&
+						isImportMapCapableBase(base);
+					const enforceDynamicImports =
+						!preloadDynamicChunks && !importMapCapable;
+
 					if (runtimePatchDynamicLinks) {
 						// Step 2a-pre: Rewrite dynamic import() call sites when
 						// JS-level enforcement is active. This is performed BEFORE
@@ -279,23 +324,10 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// Activation condition: the user has disabled the
 						// build-time modulepreload injection (preloadDynamicChunks
 						// is false) AND the import map cannot cover every consumer
-						// of this bundle. JS-level enforcement is the fallback
-						// for builds where the import map is insufficient: no
-						// HTML in the bundle (backend-owned HTML / manifest
-						// consumers), a manifest emitted ALONGSIDE HTML (the
-						// manifest consumer's server-rendered pages have no
-						// import map, so suppressing the rewrite would silently
-						// drop their enforcement), or a relative base (no valid
-						// import map keys). Wherever the import map covers all
-						// consumers it subsumes this path — the browser enforces
-						// SRI natively on module fetches (single fetch, no
-						// rewrite, source maps kept).
-						const importMapCapable =
-							hasHtmlFiles &&
-							!hasManifestFiles &&
-							isImportMapCapableBase(base);
-						const enforceDynamicImports =
-							!preloadDynamicChunks && !importMapCapable;
+						// of this bundle (see importMapCapable above). Wherever
+						// the import map covers all consumers it subsumes this
+						// path — the browser enforces SRI natively on module
+						// fetches (single fetch, no rewrite, source maps kept).
 						if (enforceDynamicImports) {
 							// ORDERING INVARIANT: this rewrite MUST run before
 							// any hashing AND before the runtime is injected
@@ -397,11 +429,62 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							dynamicImportAnalyzer.redundantImportMapChunks(
 								bundle
 							);
+
+						// Never degrade coverage silently. Model every channel
+						// explicitly and warn about whatever none of them reach,
+						// rather than inferring it from one flag pair — the
+						// earlier flag-based guard missed the case this exists to
+						// catch (relative base at stock defaults: no map, narrow
+						// preloads, no rewrite, and no warning).
+						//
+						// A module-graph chunk is covered when:
+						//  - the import map is emitted (covers every chunk), or
+						//  - modulepreload injection reaches it: the whole graph
+						//    when widened, otherwise only dynamic import targets,
+						//    or
+						//  - the import() rewrite is active AND it is a dynamic
+						//    import target. The rewrite hooks call sites, so it
+						//    can never reach a chunk pulled by a STATIC import
+						//    inside a lazy chunk.
+						//
+						// Gated on chunks actually existing, so a single-bundle
+						// build with no module-graph fetches stays quiet.
+						const moduleChunks = collectModuleChunkFiles(
+							sriByPathname,
+							skipResources,
+							redundantImportMapChunks
+						).map((f) => f.fileName);
+						const covered = new Set<string>();
+						if (importMapCapable) {
+							moduleChunks.forEach((f) => covered.add(f));
+						}
+						if (preloadDynamicChunks) {
+							if (!importMapIntegrity) {
+								moduleChunks.forEach((f) => covered.add(f));
+							} else {
+								dynamicChunkFiles.forEach((f) => covered.add(f));
+							}
+						}
+						if (enforceDynamicImports && runtimePatchDynamicLinks) {
+							dynamicChunkFiles.forEach((f) => covered.add(f));
+						}
+						const uncovered = moduleChunks.filter(
+							(f) => !covered.has(f)
+						);
+						if (uncovered.length > 0) {
+							logger.warn(
+								`${uncovered.length} module-graph chunk(s) will load without SRI — no active mechanism covers them. ` +
+									"Set importMapIntegrity: false to cover them with modulepreload links (requires preloadDynamicChunks). " +
+									`Affected: ${uncovered.slice(0, 5).join(", ")}${uncovered.length > 5 ? `, +${uncovered.length - 5} more` : ""}`
+							);
+						}
+
 						const htmlProcessor = new HtmlProcessor({
 							algorithm,
 							crossorigin,
 							base,
 							preloadDynamicChunks,
+							importMapIntegrity,
 							enableCache,
 							remoteCache,
 							pending,
