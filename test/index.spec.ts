@@ -1,7 +1,11 @@
 import vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sri, { buildSriRuntimeCode, rewriteDynamicImports } from "../src/index";
-import { installSriRuntime, installSriRuntimeWithDeps } from "../src/internal";
+import {
+	installSriRuntime,
+	installSriRuntimeWithDeps,
+	minifyRuntimeSource,
+} from "../src/internal";
 import {
 	createMockPluginContext,
 	spyOnConsole,
@@ -2417,7 +2421,7 @@ describe("vite-plugin-sri-gen", () => {
 });
 
 describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () => {
-	it("installs the global even when the serialized runtime references esbuild's __name helper", () => {
+	it("installs the global even when the serialized runtime references esbuild's __name helper", async () => {
 		// The plugin is bundled with esbuild's keepNames transform, which wraps
 		// named function expressions in a module-scoped `__name(fn, "name")`
 		// helper. That helper is NOT part of `installSriRuntime.toString()`, so
@@ -2453,12 +2457,17 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(typeof sandbox.__sriImport).toBe("function");
 	});
 
-	it("installs globalThis.__sriImport from the real runtime when enforcement is enabled", () => {
+	it("installs globalThis.__sriImport from the real runtime when enforcement is enabled", async () => {
 		// Positive/smoke test for the real runtime. Note: vitest transforms `src`
 		// without esbuild's keepNames, so the real `installSriRuntime.toString()`
 		// here contains no `__name`; this test therefore passes with or without
 		// the shim. The preceding test (synthetic `__name`) is the actual
 		// regression guard for issue #30.
+		//
+		// It also exercises the minified runtime end to end: a minifier that
+		// hoisted a helper out of the serialized function would leave the
+		// reference dangling here, so this doubles as the self-containment guard
+		// for issue #45's minification step.
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/chunk.js": "sha384-abc" },
@@ -2488,7 +2497,7 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(typeof sandbox.__sriImport).toBe("function");
 	});
 
-	it("preserves the runtime arguments and the installSriRuntime source", () => {
+	it("preserves the runtime arguments and the installSriRuntime source", async () => {
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/a.js": "sha384-x" },
@@ -2505,7 +2514,7 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(code).toContain('{"/a.js":"sha384-x"}');
 	});
 
-	it("serializes the base option into the injected runtime arguments", () => {
+	it("serializes the base option into the injected runtime arguments", async () => {
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/assets/lazy.js": "sha256-abc" },
@@ -2519,7 +2528,7 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(code).toContain('base: "/app/"');
 	});
 
-	it("defaults the serialized base to '/' when not provided", () => {
+	it("defaults the serialized base to '/' when not provided", async () => {
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/a.js": "sha384-x" },
@@ -2532,7 +2541,159 @@ describe("buildSriRuntimeCode (issue #30: self-contained injected runtime)", () 
 		expect(code).toContain('base: "/"');
 	});
 
-	it("escapes `<` in serialized data so it cannot break out of the injected script", () => {
+	it("leaves the injected runtime unminified when the consumer disables build.minify", async () => {
+		// A consumer who asked for a readable bundle wants this readable too —
+		// the 4 KB it costs is irrelevant in a build they are reading. Any other
+		// value ("esbuild", "terser", "oxc", true) leaves minification on.
+		const build = async (minify: unknown) => {
+			const plugin = sri() as any;
+			plugin.configResolved?.call(createMockPluginContext().context, {
+				command: "build",
+				mode: "production",
+				base: "/",
+				build: { minify },
+			} as any);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					fileName: "index.html",
+					source: htmlDoc(
+						'<script type="module" src="/assets/entry.js"></script>'
+					),
+				},
+				"assets/entry.js": makeEntryChunk(),
+			};
+			await plugin.generateBundle.handler.call(
+				createMockPluginContext().context,
+				{},
+				bundle
+			);
+			return bundle["assets/entry.js"].code as string;
+		};
+
+		expect(await build(false)).toMatch(/\n[ \t]+/);
+		expect(await build("esbuild")).not.toMatch(/\n[ \t]+/);
+	});
+
+	it("forwards arguments through the patched DOM methods after minification", async () => {
+		// The runtime patches setAttribute/appendChild with non-arrow
+		// `function(){...arguments...}` expressions. If a minifier ever
+		// arrow-converted one, `arguments` would rebind to the enclosing
+		// installSriRuntime(sriByPathname, opts) scope and the original method
+		// would silently receive the wrong values. Asserting only that install
+		// succeeds cannot catch that — the patched methods have to be called.
+		const source = await minifyRuntimeSource(installSriRuntime.toString());
+		const code = buildSriRuntimeCode(
+			source,
+			{ "/assets/lazy.js": "sha384-abc" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+			}
+		);
+
+		const setAttrCalls: unknown[][] = [];
+		const appendCalls: unknown[][] = [];
+		function El(this: any) {}
+		El.prototype.setAttribute = function (...args: unknown[]) {
+			setAttrCalls.push(args);
+			return "orig-result";
+		};
+		function NodeCtor(this: any) {}
+		NodeCtor.prototype = {
+			appendChild(...args: unknown[]) {
+				appendCalls.push(args);
+				return args[0];
+			},
+		};
+		const sandbox: any = {
+			Element: El,
+			Node: NodeCtor,
+			HTMLLinkElement: function Link(this: any) {},
+			HTMLScriptElement: function Script(this: any) {},
+		};
+		vm.createContext(sandbox);
+		vm.runInContext(code, sandbox);
+
+		// Drive the patched methods through the sandbox so the minified copies
+		// are the ones under test, not this file's in-process originals.
+		vm.runInContext(
+			`
+			globalThis.el = new Element();
+			globalThis.setAttrReturn = el.setAttribute("data-foo", "bar");
+			globalThis.child = { nodeName: "DIV" };
+			globalThis.appendReturn = Node.prototype.appendChild.call(el, child);
+			`,
+			sandbox
+		);
+
+		expect(setAttrCalls).toEqual([["data-foo", "bar"]]);
+		expect(sandbox.setAttrReturn).toBe("orig-result");
+		expect(appendCalls).toEqual([[sandbox.child]]);
+		expect(sandbox.appendReturn).toBe(sandbox.child);
+	});
+
+	it("still rejects a hash mismatch after minification", async () => {
+		// Guards against a minifier dead-code-eliminating or short-circuiting the
+		// integrity comparison. Without this, a minified runtime that verified
+		// nothing would pass every text-based assertion in this file.
+		const source = await minifyRuntimeSource(installSriRuntime.toString());
+		const code = buildSriRuntimeCode(
+			source,
+			{ "/assets/lazy.js": "sha384-" + "A".repeat(64) },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+			}
+		);
+
+		const sandbox: any = {
+			location: { href: "https://example.test/index.html" },
+			fetch: async () => ({
+				ok: true,
+				arrayBuffer: async () => new TextEncoder().encode("payload").buffer,
+			}),
+			crypto: globalThis.crypto,
+			btoa: globalThis.btoa,
+			TextEncoder,
+			URL,
+		};
+		vm.createContext(sandbox);
+		vm.runInContext(code, sandbox);
+		expect(typeof sandbox.__sriImport).toBe("function");
+
+		// The map above pins a hash that "payload" cannot produce, so the
+		// verifier must refuse rather than importing it.
+		await expect(
+			sandbox.__sriImport(
+				"https://example.test/assets/entry.js",
+				"/assets/lazy.js"
+			)
+		).rejects.toThrow(/Integrity verification failed/);
+	});
+
+	it("accepts pre-serialized runtime source so the caller can minify it first", () => {
+		// The plugin passes minified source rather than the function itself, so
+		// the assembler must treat a string as already-serialized rather than
+		// calling .toString() on it and embedding a quoted string literal.
+		const code = buildSriRuntimeCode(
+			"function fake(){globalThis.__sriImport=function(){};}",
+			{ "/a.js": "sha384-x" },
+			{
+				crossorigin: "anonymous",
+				skipResources: [],
+				enforceDynamicImports: true,
+			}
+		);
+		const sandbox: any = {};
+		vm.createContext(sandbox);
+		vm.runInContext(code, sandbox);
+		expect(typeof sandbox.__sriImport).toBe("function");
+	});
+
+	it("escapes `<` in serialized data so it cannot break out of the injected script", async () => {
 		const code = buildSriRuntimeCode(
 			installSriRuntime,
 			{ "/a</script>b.js": "sha384-x", "/normal path.js": "sha384-y" },

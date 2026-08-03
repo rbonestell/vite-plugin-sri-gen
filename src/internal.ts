@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { DefaultTreeAdapterTypes, Token } from "parse5";
 import { parse, serialize } from "parse5";
 import type { Rollup } from "vite";
@@ -2618,6 +2620,162 @@ export class ManifestProcessor {
 // =======================================================
 // #region RUNTIME SRI INJECTION
 // =======================================================
+
+/** Synthetic filename reported to the minifier for diagnostics only. */
+const RUNTIME_FILENAME = "sri-runtime.js";
+
+/**
+ * The minifier surface this module needs from Vite. Both members are optional:
+ * which one exists depends on the consumer's Vite major.
+ */
+export interface ViteMinifiers {
+	/** Vite 8+: rolldown's (OXC) minifier, re-exported as first-class Vite API. */
+	minifySync?: (
+		filename: string,
+		source: string
+	) => { code: string } | undefined;
+	/** Vite 4-7: esbuild, which those versions depend on directly. */
+	transformWithEsbuild?: (
+		source: string,
+		filename: string,
+		options: Record<string, unknown>
+	) => Promise<{ code: string }>;
+}
+
+/**
+ * Loads Vite so its minifier can be borrowed for the injected runtime.
+ *
+ * A bare `import("vite")` covers npm, pnpm and Yarn PnP: `vite` is this
+ * plugin's declared peer dependency, so every linker is obliged to expose it to
+ * us. It does NOT cover a symlinked plugin (`npm link`, or a `file:` dependency
+ * pointing outside the consumer's tree): Node resolves this module to its
+ * realpath before walking `node_modules` ancestry, and that realpath has no
+ * Vite above it. The consumer's project root always does, so resolving from
+ * there recovers the symlinked case.
+ *
+ * Ordering matters. The bare import is the broadly-verified path and stays
+ * primary; the root anchor runs only once it has failed.
+ *
+ * The fallback resolves `vite/package.json` and targets the ESM entry by path
+ * rather than resolving the `vite` specifier itself. `createRequire().resolve`
+ * applies CJS conditions, and Vite 4-6 map those to an `index.cjs` shim that
+ * prints a CJS-deprecation warning into the consumer's build the moment it is
+ * loaded. Every major from 4 to 8 places the ESM entry at the same path, and
+ * `vite/package.json` is an exported subpath in all of them. If either
+ * assumption ever breaks, the import throws and the caller keeps the
+ * unminified source — the same outcome as having no fallback at all.
+ *
+ * @param root - The consumer's resolved `config.root`
+ * @param primary - Injected primary importer (defaults to `import("vite")`)
+ */
+export async function loadVite(
+	root: string,
+	primary: () => Promise<unknown> = () => import("vite")
+): Promise<ViteMinifiers> {
+	try {
+		return (await primary()) as ViteMinifiers;
+	} catch {
+		const req = createRequire(
+			pathToFileURL(path.join(root, "package.json")).href
+		);
+		const viteDir = path.dirname(req.resolve("vite/package.json"));
+		return (await import(
+			pathToFileURL(path.join(viteDir, "dist", "node", "index.js")).href
+		)) as ViteMinifiers;
+	}
+}
+
+/**
+ * Minifies the serialized SRI runtime at the CONSUMER's build time.
+ *
+ * `installSriRuntime` is not build-time-only code: it is serialized with
+ * `.toString()` and prepended to every entry chunk, so its source bytes are
+ * shipped to browsers. This plugin publishes its own `dist` unminified on
+ * purpose (see tsup.config.ts), and the consumer's minifier cannot reclaim
+ * those bytes either, because the runtime is injected in `generateBundle`,
+ * which runs after the `renderChunk` hooks where minification happens. Left
+ * alone that costs ~8.8 KB per entry chunk at default settings against ~4.3 KB
+ * minified, a little under half (issue #45).
+ *
+ * When measuring this, note that importing the plugin by absolute/relative path
+ * in a scratch `vite.config` understates the unminified figure by ~15%: Vite's
+ * config loader bundles path imports and reprints this module before
+ * `.toString()` reads it. Bare specifiers stay external, so a real install sees
+ * the full size.
+ *
+ * The minifier is reached through `vite` rather than by importing `esbuild` or
+ * `rolldown` directly. That is deliberate: `vite` is this plugin's declared
+ * peer dependency, so it resolves from the plugin's own scope under every
+ * package manager, whereas a bare `import("esbuild")` is a phantom dependency
+ * that fails under pnpm and Yarn PnP — silently disabling this optimisation
+ * for a large share of consumers. Vite re-exports whichever minifier its major
+ * ships with, so going through it also covers both eras with one import.
+ *
+ * `minifySync` is tried first because `transformWithEsbuild` is deprecated on
+ * Vite 8: it warns when esbuild happens to be installed, and throws outright
+ * when it is not — which is the common case there, since Vite 8 demoted esbuild
+ * to an optional peer. Capability detection keeps that branch unreachable on
+ * Vite 8, and the surrounding catch makes the failure harmless if it is ever
+ * reached anyway.
+ *
+ * `target: "esnext"` is load-bearing, not cosmetic. Downlevelling makes esbuild
+ * hoist helpers (`__async`, `__spreadValues`, ...) ABOVE the function and
+ * therefore outside the serialized text, reproducing the undefined-helper
+ * failure of issue #30. `keepNames: false` is pinned for the same reason — that
+ * transform is what caused #30 in the first place. The `startsWith("function")`
+ * guard is the backstop: any output that grew a prologue is discarded in favour
+ * of the original source, which is always self-contained.
+ *
+ * Every failure path returns `source` unchanged, which is exactly the behaviour
+ * that shipped before minification existed.
+ *
+ * @param source - `installSriRuntime.toString()`
+ * @param logger - Optional logger; failures are reported at info level
+ * @param load - Injected Vite loader (defaults to the real `vite` import)
+ */
+export async function minifyRuntimeSource(
+	source: string,
+	logger?: BundleLogger,
+	load: () => Promise<ViteMinifiers> = () => import("vite")
+): Promise<string> {
+	try {
+		const vite = await load();
+		let minified: string | undefined;
+
+		if (typeof vite.minifySync === "function") {
+			minified = vite.minifySync(RUNTIME_FILENAME, source)?.code;
+		} else if (typeof vite.transformWithEsbuild === "function") {
+			minified = (
+				await vite.transformWithEsbuild(source, RUNTIME_FILENAME, {
+					minify: true,
+					target: "esnext",
+					keepNames: false,
+				})
+			)?.code;
+		} else {
+			logger?.info(
+				"SRI runtime minification skipped: this Vite version exposes no minifier"
+			);
+			return source;
+		}
+
+		const trimmed = typeof minified === "string" ? minified.trim() : "";
+		if (!trimmed.startsWith("function")) {
+			logger?.info(
+				"SRI runtime minification skipped: minifier output was not a bare function declaration"
+			);
+			return source;
+		}
+		return trimmed;
+	} catch (err) {
+		logger?.info(
+			`SRI runtime minification skipped: ${
+				err instanceof Error ? err.message : String(err)
+			}`
+		);
+		return source;
+	}
+}
 
 /**
  * Runtime helper injected into entry chunks to add SRI to dynamically inserted elements.
