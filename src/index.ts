@@ -17,7 +17,9 @@ import {
 	installSriRuntime,
 	IntegrityProcessor,
 	isImportMapCapableBase,
+	loadVite,
 	ManifestProcessor,
+	minifyRuntimeSource,
 	validateGenerateBundleInputs,
 } from "./internal";
 
@@ -62,7 +64,14 @@ export interface SriPluginOptions {
 	 * private to other pages.
 	 */
 	importMapIntegrity?: boolean;
-	/** Inject a tiny runtime that sets integrity on dynamically inserted <script>/<link>. Default: true */
+	/**
+	 * Inject a tiny runtime that sets integrity on dynamically inserted
+	 * <script>/<link>. Default: true.
+	 *
+	 * The runtime is minified before injection, independently of how the rest of
+	 * the bundle is built, because it is added after the minification stage runs.
+	 * Setting Vite's `build.minify: false` opts it out along with everything else.
+	 */
 	runtimePatchDynamicLinks?: boolean;
 	/** Skip SRI generation for resources matching these patterns. Supports exact matches and simple glob patterns with '*'. */
 	skipResources?: string[];
@@ -130,12 +139,20 @@ export function rewriteDynamicImports(code: string): string {
  * to the runtime so integrity lookups can strip the base prefix from URLs
  * observed at runtime — the integrity map keys are '/'-rooted bundle file
  * names that never include the base.
+ *
+ * @param runtime - Either the runtime function (serialized here via
+ * `.toString()`) or already-serialized source. The plugin passes source that
+ * has been through `minifyRuntimeSource` first, which is why this accepts a
+ * string; passing the function directly yields the unminified form.
+ * @returns The complete statement to prepend to an entry chunk.
  */
 export function buildSriRuntimeCode(
-	runtime: (
-		sriByPathname: Record<string, string>,
-		opts?: Record<string, unknown>
-	) => void,
+	runtime:
+		| ((
+				sriByPathname: Record<string, string>,
+				opts?: Record<string, unknown>
+		  ) => void)
+		| string,
 	sriByPathname: Record<string, string>,
 	opts: {
 		crossorigin: "anonymous" | "use-credentials" | undefined;
@@ -156,9 +173,18 @@ export function buildSriRuntimeCode(
 	);
 	const serializedBase = escapeForScript(JSON.stringify(opts.base ?? "/"));
 	const args = `${serializedMap}, { crossorigin: ${cors}, skipResources: ${serializedSkipPatterns}, enforceDynamicImports: ${opts.enforceDynamicImports}, base: ${serializedBase} }`;
+	// A pre-serialized string is accepted so the caller can run the source
+	// through minifyRuntimeSource (async) while this stays a synchronous,
+	// side-effect-free string assembler. `args` is deliberately never minified:
+	// a minifier parses escapeForScript's `<` back to a plain `<` and re-emits
+	// it in whatever form it prefers, which would leave script-breakout safety
+	// to the minifier's heuristics instead of the explicit escaping above. The
+	// arguments are single-line JSON anyway, so there is nothing to reclaim.
+	const runtimeSource =
+		typeof runtime === "string" ? runtime : runtime.toString();
 	// Self-containment shim — see the doc comment above for why this is needed.
 	const shim = "var __name=function(fn){return fn;};";
-	return `\n(function(){${shim}return (${runtime.toString()});})()(${args});\n`;
+	return `\n(function(){${shim}return (${runtimeSource});})()(${args});\n`;
 }
 
 /**
@@ -187,6 +213,13 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 
 	// Build-time state
 	let base = "/";
+	// The consumer's project root; anchors Vite resolution when this plugin is
+	// symlinked into the project (see loadVite).
+	let viteRoot = process.cwd();
+	// Mirrors the consumer's `build.minify`. Only an explicit `false` disables
+	// minification of the injected runtime; every other value ("esbuild",
+	// "terser", "oxc", true) leaves it enabled.
+	let minifyRuntime = true;
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
 
@@ -200,6 +233,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 			// Fallback SSR detection from resolved config (may be a string or boolean)
 			isSSR = isSSR || !!config.build?.ssr;
 			base = config.base ?? "/";
+			minifyRuntime = config.build?.minify !== false;
+			viteRoot = config.root || process.cwd();
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -375,8 +410,20 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// Step 2b: Inject runtime into entry chunks (BEFORE hashing entry chunks)
 						// The runtime contains hashes for dynamic chunks so they can be verified at load time
 						logger.info("Injecting SRI runtime into entry chunks");
+						// Minified separately from the assembly step below so the
+						// escaped JSON arguments never pass through a minifier.
+						// Honours the consumer's `build.minify: false`: someone
+						// who asked for a readable bundle wants this readable
+						// too, and 4 KB is irrelevant in a debug build.
+						const runtimeSource = minifyRuntime
+							? await minifyRuntimeSource(
+								installSriRuntime.toString(),
+								logger,
+								() => loadVite(viteRoot)
+							  )
+							: installSriRuntime.toString();
 						const runtimeCode = buildSriRuntimeCode(
-							installSriRuntime,
+							runtimeSource,
 							nonEntryHashes,
 							{
 								crossorigin,

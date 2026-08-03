@@ -17,6 +17,8 @@ import {
 	isEligibleForSri,
 	isHttpUrl,
 	isImportMapCapableBase,
+	loadVite,
+	minifyRuntimeSource,
 	buildImportIntegrityObject,
 	collectModuleChunkFiles,
 	joinBaseHref,
@@ -6014,5 +6016,196 @@ describe("collectModuleChunkFiles", () => {
 		// base is usable here even though it yields no valid import map.
 		expect(buildImportIntegrityObject(sriByPathname, "./")).toBeNull();
 		expect(collectModuleChunkFiles(sriByPathname).length).toBe(2);
+	});
+});
+
+describe("minifyRuntimeSource (issue #45: injected runtime ships minified)", () => {
+	const SOURCE = "function installSriRuntime(a, b) {\n\treturn a + b;\n}";
+
+	// Vite 8+ re-exports rolldown's minifier; Vite 4-7 expose esbuild via
+	// transformWithEsbuild. The loader is injected so each era — and each
+	// failure mode — is reachable without depending on what happens to be
+	// installed in this repo, where esbuild is always present via tsup.
+	const viteWithMinifySync = (code: string, spy = vi.fn()) => () =>
+		Promise.resolve({
+			minifySync: (...args: unknown[]) => {
+				spy(...args);
+				return { code };
+			},
+		});
+
+	const viteWithEsbuild = (code: string, spy = vi.fn()) => () =>
+		Promise.resolve({
+			transformWithEsbuild: async (...args: unknown[]) => {
+				spy(...args);
+				return { code };
+			},
+		});
+
+	it("uses Vite's minifySync when present (Vite 8+)", async () => {
+		const spy = vi.fn();
+		const out = await minifyRuntimeSource(
+			SOURCE,
+			undefined,
+			viteWithMinifySync("function installSriRuntime(a,b){return a+b}", spy)
+		);
+		expect(out).toBe("function installSriRuntime(a,b){return a+b}");
+		expect(spy).toHaveBeenCalledWith("sri-runtime.js", SOURCE);
+	});
+
+	it("prefers minifySync over transformWithEsbuild when Vite exposes both", async () => {
+		// transformWithEsbuild still exists on Vite 8 but is deprecated there and
+		// prints a warning into every consumer build, so it must not be reached.
+		const esbuildSpy = vi.fn();
+		const out = await minifyRuntimeSource(SOURCE, undefined, () =>
+			Promise.resolve({
+				minifySync: () => ({ code: "function fromMinifySync(){}" }),
+				transformWithEsbuild: async (...args: unknown[]) => {
+					esbuildSpy(...args);
+					return { code: "function fromEsbuild(){}" };
+				},
+			})
+		);
+		expect(out).toBe("function fromMinifySync(){}");
+		expect(esbuildSpy).not.toHaveBeenCalled();
+	});
+
+	it("falls back to transformWithEsbuild when minifySync is absent (Vite 4-7)", async () => {
+		const spy = vi.fn();
+		const out = await minifyRuntimeSource(
+			SOURCE,
+			undefined,
+			viteWithEsbuild("function installSriRuntime(a,b){return a+b}", spy)
+		);
+		expect(out).toBe("function installSriRuntime(a,b){return a+b}");
+		expect(spy).toHaveBeenCalledWith(SOURCE, "sri-runtime.js", {
+			// Pinned deliberately: downlevelling hoists esbuild helpers above the
+			// function, outside the serialized text, which is what broke issue #30.
+			// keepNames is the transform that caused #30 in the first place.
+			minify: true,
+			target: "esnext",
+			keepNames: false,
+		});
+	});
+
+	it("rejects minifier output that grew a prologue and keeps the original source", async () => {
+		// The real shape this guards: a downlevelling minifier hoists `__async`
+		// above the function, so the serialized text would reference a helper
+		// that does not exist in the consumer's bundle.
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(
+			SOURCE,
+			logger,
+			viteWithMinifySync(
+				"var __async=(a,b)=>new Promise(a);function installSriRuntime(a,b){return a+b}"
+			)
+		);
+		expect(out).toBe(SOURCE);
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringContaining("not a bare function declaration")
+		);
+	});
+
+	it("keeps the original source when Vite exposes no minifier at all", async () => {
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(SOURCE, logger, () =>
+			Promise.resolve({})
+		);
+		expect(out).toBe(SOURCE);
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringContaining("no minifier")
+		);
+	});
+
+	it("keeps the original source and reports why when the minifier throws", async () => {
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(SOURCE, logger, () =>
+			Promise.resolve({
+				minifySync: () => {
+					throw new Error("boom");
+				},
+			})
+		);
+		expect(out).toBe(SOURCE);
+		// The reason must survive: a silent catch made a broken minifier
+		// integration indistinguishable from one that was simply absent.
+		expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("boom"));
+	});
+
+	it("reports a non-Error throwable without losing the original source", async () => {
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(SOURCE, logger, () =>
+			Promise.resolve({
+				minifySync: () => {
+					throw "plain string failure";
+				},
+			})
+		);
+		expect(out).toBe(SOURCE);
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringContaining("plain string failure")
+		);
+	});
+
+	it("keeps the original source when Vite itself cannot be loaded", async () => {
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), summary: vi.fn() };
+		const out = await minifyRuntimeSource(SOURCE, logger, () =>
+			Promise.reject(new Error("Cannot find package 'vite'"))
+		);
+		expect(out).toBe(SOURCE);
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringContaining("Cannot find package")
+		);
+	});
+
+	it("tolerates a minifier that returns no code", async () => {
+		const out = await minifyRuntimeSource(SOURCE, undefined, () =>
+			Promise.resolve({ minifySync: () => undefined })
+		);
+		expect(out).toBe(SOURCE);
+	});
+
+	it("actually minifies the real runtime through the installed Vite", async () => {
+		// End-to-end against whatever minifier this environment really has, so a
+		// break in the default loader is caught rather than mocked around.
+		const out = await minifyRuntimeSource(installSriRuntime.toString());
+		expect(out.startsWith("function")).toBe(true);
+		expect(out).not.toMatch(/\n[ \t]+/);
+		// Comment-stripped-but-indented source is ~8 KB; real minification is
+		// ~4.3 KB. A threshold below that gap fails a whitespace-only collapse.
+		expect(out.length).toBeLessThan(6000);
+	});
+});
+
+describe("loadVite (issue #45: reaching Vite's minifier under every linker)", () => {
+	it("returns Vite from the plain import when that resolves", async () => {
+		const vite = await loadVite("/nonexistent-root-never-used");
+		// The bare import is the primary path; the unusable root proves the
+		// fallback was not consulted.
+		expect(typeof vite.minifySync === "function" ||
+			typeof vite.transformWithEsbuild === "function").toBe(true);
+	});
+
+	it("falls back to the project root when the plugin is symlinked out of Vite's reach", async () => {
+		// `npm link` (and a `file:` dependency outside the consumer's tree) makes
+		// Node resolve this module to its realpath before walking node_modules,
+		// and that realpath has no Vite above it. The consumer's root always does.
+		const vite = await loadVite(process.cwd(), () =>
+			Promise.reject(
+				new Error("ERR_MODULE_NOT_FOUND Cannot find package 'vite'")
+			)
+		);
+		expect(typeof vite.minifySync === "function" ||
+			typeof vite.transformWithEsbuild === "function").toBe(true);
+	});
+
+	it("propagates the failure when neither path can reach Vite", async () => {
+		// minifyRuntimeSource catches this and keeps the unminified source; the
+		// loader itself must not swallow it silently.
+		await expect(
+			loadVite("/nonexistent-root", () =>
+				Promise.reject(new Error("no vite"))
+			)
+		).rejects.toThrow();
 	});
 });
