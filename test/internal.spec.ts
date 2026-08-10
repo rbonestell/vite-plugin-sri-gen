@@ -809,6 +809,85 @@ describe("Internal Utility Functions", () => {
 
 			expect(getAttrValue(element, "integrity")).toBe("sha384-subdirHash");
 		});
+
+		it("finds pre-computed hash for a protocol-relative URL under an absolute base", async () => {
+			const element = createTestElement("script", [
+				{
+					name: "src",
+					value: "//cdn.example.com/app/assets/main.js",
+				},
+			]);
+			const preComputedHashes = {
+				"/assets/main.js": "sha384-protocolRelativeHash",
+			};
+
+			await processElement(
+				element,
+				mockBundle({}),
+				"sha384",
+				undefined,
+				undefined,
+				preComputedHashes,
+				"https://cdn.example.com/app/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe(
+				"sha384-protocolRelativeHash"
+			);
+		});
+
+		it("finds pre-computed hash when the base has no trailing slash", async () => {
+			const element = createTestElement("script", [
+				{
+					name: "src",
+					value: "https://cdn.example.com/app/assets/main.js",
+				},
+			]);
+			const preComputedHashes = {
+				"/assets/main.js": "sha384-noTrailingSlashHash",
+			};
+
+			await processElement(
+				element,
+				mockBundle({}),
+				"sha384",
+				undefined,
+				undefined,
+				preComputedHashes,
+				"https://cdn.example.com/app"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe(
+				"sha384-noTrailingSlashHash"
+			);
+		});
+
+		it("does not strip a base prefix that is not a whole path segment", async () => {
+			// base "/app" must not truncate "/app-legacy/vendor.js" into a
+			// spurious "/-legacy/vendor.js" lookup key
+			const element = createTestElement("script", [
+				{
+					name: "src",
+					value: "https://cdn.example.com/app-legacy/vendor.js",
+				},
+			]);
+			const preComputedHashes = {
+				"/-legacy/vendor.js": "sha384-wrongHash",
+			};
+			mockFetch.mockRejectedValue(new Error("network unavailable"));
+
+			await processElement(
+				element,
+				mockBundle({}),
+				"sha384",
+				undefined,
+				undefined,
+				preComputedHashes,
+				"https://cdn.example.com/app"
+			).catch(() => {});
+
+			expect(getAttrValue(element, "integrity")).toBeUndefined();
+		});
 	});
 
 	describe("addSriToHtml", () => {
@@ -1696,6 +1775,43 @@ describe("Processing Classes", () => {
 			expect(String(bundle["index.html"].source)).toContain(
 				'integrity="sha256-'
 			);
+		});
+
+		it("applies pre-computed integrity to an existing script tag when an absolute base prefixes the URL", async () => {
+			const mockLogger = createMockBundleLogger();
+
+			const config = {
+				algorithm: "sha384" as const,
+				crossorigin: "anonymous" as const,
+				base: "https://cdn.example.com/app/",
+				preloadDynamicChunks: false,
+				enableCache: true,
+				remoteCache: new Map(),
+				pending: new Map(),
+				fetchTimeoutMs: 5000,
+				logger: mockLogger,
+				skipResources: [],
+			};
+
+			const processor = new HtmlProcessor(config);
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: '<html><head><script src="https://cdn.example.com/app/assets/app.js"></script></head></html>',
+				},
+			};
+			const sriByPathname = { "/assets/app.js": "sha384-wiredHash" };
+
+			await processor.processHtmlFiles(
+				bundle,
+				sriByPathname,
+				new Set<string>()
+			);
+
+			expect(String(bundle["index.html"].source)).toContain(
+				'integrity="sha384-wiredHash"'
+			);
+			expect(mockFetch).not.toHaveBeenCalled();
 		});
 
 		it("handles HTML processing errors gracefully", async () => {

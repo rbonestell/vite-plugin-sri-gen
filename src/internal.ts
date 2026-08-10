@@ -785,18 +785,34 @@ export async function processElement(
 	// Check for pre-computed integrity hash first
 	let integrity: string | undefined;
 	if (preComputedHashes && resourcePath) {
-		// Strip the configured base prefix so base-prefixed URLs (absolute CDN
-		// bases, sub-path deploys) match bundle-relative hash keys (issue #50)
-		let lookupPath = resourcePath;
-		if (base && base !== "/" && lookupPath.startsWith(base)) {
-			lookupPath = lookupPath.slice(base.length);
-		}
 		// Extract pathname from resource URL (handles absolute CDN URLs)
-		const pathname = extractPathnameFromResourceUrl(lookupPath);
+		const pathname = extractPathnameFromResourceUrl(resourcePath);
 
 		// Try to find a matching pre-computed hash
 		// Check exact pathname first, then try normalized versions
 		integrity = preComputedHashes[pathname];
+		if (!integrity && base) {
+			// Retry with the configured base's pathname stripped, mirroring
+			// the runtime's lookupIntegrityByPathname: hash keys are
+			// bundle-relative while sub-path and CDN-base deployments prefix
+			// URLs with the base (issue #50). Parsing the base to a
+			// trailing-slash pathname keeps the strip segment-aligned (a
+			// base of "/app" cannot truncate "/app-legacy/x.js") and matches
+			// protocol-relative URL forms of an absolute base.
+			let basePathname = "/";
+			try {
+				basePathname = new URL(base, "http://x/").pathname;
+				if (!basePathname.endsWith("/")) basePathname += "/";
+			} catch {
+				// Unparseable base (e.g. relative "./") — no stripping
+			}
+			if (basePathname !== "/" && pathname.startsWith(basePathname)) {
+				integrity =
+					preComputedHashes[
+						`/${pathname.slice(basePathname.length)}`
+					];
+			}
+		}
 		if (!integrity) {
 			const normalizedPath = normalizeBundlePath(pathname) as string;
 			integrity =
