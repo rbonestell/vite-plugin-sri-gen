@@ -758,6 +758,8 @@ function setAttrValue(element: Element, name: string, value: string): void {
  * @param crossorigin - CORS setting to apply
  * @param resourceOpts - Resource loading configuration
  * @param preComputedHashes - Optional pre-computed integrity hashes by pathname
+ * @param base - Resolved Vite base; stripped from resource URLs so
+ * base-prefixed (e.g. absolute CDN) URLs match bundle-relative hash keys
  */
 export async function processElement(
 	element: Element,
@@ -765,7 +767,8 @@ export async function processElement(
 	algorithm: "sha256" | "sha384" | "sha512",
 	crossorigin?: "anonymous" | "use-credentials",
 	resourceOpts?: LoadResourceOptions,
-	preComputedHashes?: Record<string, string>
+	preComputedHashes?: Record<string, string>,
+	base?: string
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
@@ -788,6 +791,28 @@ export async function processElement(
 		// Try to find a matching pre-computed hash
 		// Check exact pathname first, then try normalized versions
 		integrity = preComputedHashes[pathname];
+		if (!integrity && base) {
+			// Retry with the configured base's pathname stripped, mirroring
+			// the runtime's lookupIntegrityByPathname: hash keys are
+			// bundle-relative while sub-path and CDN-base deployments prefix
+			// URLs with the base (issue #50). Parsing the base to a
+			// trailing-slash pathname keeps the strip segment-aligned (a
+			// base of "/app" cannot truncate "/app-legacy/x.js") and matches
+			// protocol-relative URL forms of an absolute base.
+			let basePathname = "/";
+			try {
+				basePathname = new URL(base, "http://x/").pathname;
+				if (!basePathname.endsWith("/")) basePathname += "/";
+			} catch {
+				// Unparseable base (e.g. relative "./") — no stripping
+			}
+			if (basePathname !== "/" && pathname.startsWith(basePathname)) {
+				integrity =
+					preComputedHashes[
+						`/${pathname.slice(basePathname.length)}`
+					];
+			}
+		}
 		if (!integrity) {
 			const normalizedPath = normalizeBundlePath(pathname) as string;
 			integrity =
@@ -884,12 +909,14 @@ export async function addSriToHtml(
 		resourceOpts,
 		skipResources = [],
 		preComputedHashes,
+		base,
 	}: {
 		algorithm?: "sha256" | "sha384" | "sha512";
 		crossorigin?: "anonymous" | "use-credentials";
 		resourceOpts?: LoadResourceOptions;
 		skipResources?: string[];
 		preComputedHashes?: Record<string, string>;
+		base?: string;
 	} = {}
 ): Promise<string> {
 	try {
@@ -912,7 +939,8 @@ export async function addSriToHtml(
 					algorithm,
 					crossorigin,
 					resourceOpts,
-					preComputedHashes
+					preComputedHashes,
+					base
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
 					const src =
@@ -1992,6 +2020,7 @@ export class HtmlProcessor {
 			},
 			skipResources: this.config.skipResources,
 			preComputedHashes: sriByPathname,
+			base: this.config.base,
 		});
 	}
 
