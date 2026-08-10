@@ -758,6 +758,8 @@ function setAttrValue(element: Element, name: string, value: string): void {
  * @param crossorigin - CORS setting to apply
  * @param resourceOpts - Resource loading configuration
  * @param preComputedHashes - Optional pre-computed integrity hashes by pathname
+ * @param base - Resolved Vite base; stripped from resource URLs so
+ * base-prefixed (e.g. absolute CDN) URLs match bundle-relative hash keys
  */
 export async function processElement(
 	element: Element,
@@ -765,7 +767,8 @@ export async function processElement(
 	algorithm: "sha256" | "sha384" | "sha512",
 	crossorigin?: "anonymous" | "use-credentials",
 	resourceOpts?: LoadResourceOptions,
-	preComputedHashes?: Record<string, string>
+	preComputedHashes?: Record<string, string>,
+	base?: string
 ): Promise<void> {
 	if (!element || !element.attrs) return;
 
@@ -782,8 +785,14 @@ export async function processElement(
 	// Check for pre-computed integrity hash first
 	let integrity: string | undefined;
 	if (preComputedHashes && resourcePath) {
+		// Strip the configured base prefix so base-prefixed URLs (absolute CDN
+		// bases, sub-path deploys) match bundle-relative hash keys (issue #50)
+		let lookupPath = resourcePath;
+		if (base && base !== "/" && lookupPath.startsWith(base)) {
+			lookupPath = lookupPath.slice(base.length);
+		}
 		// Extract pathname from resource URL (handles absolute CDN URLs)
-		const pathname = extractPathnameFromResourceUrl(resourcePath);
+		const pathname = extractPathnameFromResourceUrl(lookupPath);
 
 		// Try to find a matching pre-computed hash
 		// Check exact pathname first, then try normalized versions
@@ -884,12 +893,14 @@ export async function addSriToHtml(
 		resourceOpts,
 		skipResources = [],
 		preComputedHashes,
+		base,
 	}: {
 		algorithm?: "sha256" | "sha384" | "sha512";
 		crossorigin?: "anonymous" | "use-credentials";
 		resourceOpts?: LoadResourceOptions;
 		skipResources?: string[];
 		preComputedHashes?: Record<string, string>;
+		base?: string;
 	} = {}
 ): Promise<string> {
 	try {
@@ -912,7 +923,8 @@ export async function addSriToHtml(
 					algorithm,
 					crossorigin,
 					resourceOpts,
-					preComputedHashes
+					preComputedHashes,
+					base
 				).catch((err: any) => {
 					// Log processing errors but continue with other elements
 					const src =
@@ -1992,6 +2004,7 @@ export class HtmlProcessor {
 			},
 			skipResources: this.config.skipResources,
 			preComputedHashes: sriByPathname,
+			base: this.config.base,
 		});
 	}
 

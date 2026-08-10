@@ -760,6 +760,55 @@ describe("Internal Utility Functions", () => {
 
 			expect(getAttrValue(element, "integrity")).toBe("sha512-bundleHash");
 		});
+
+		it("finds pre-computed hash when an absolute CDN base prefixes the URL path", async () => {
+			const element = createTestElement("script", [
+				{
+					name: "src",
+					value: "https://store.example.com/project/name/production/assets/index-abc.js",
+				},
+			]);
+			const bundle = mockBundle({});
+			const preComputedHashes = {
+				"/assets/index-abc.js": "sha384-cdnBaseHash",
+			};
+
+			await processElement(
+				element,
+				bundle,
+				"sha384",
+				"anonymous",
+				undefined,
+				preComputedHashes,
+				"https://store.example.com/project/name/production/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe("sha384-cdnBaseHash");
+			expect(mockFetch).not.toHaveBeenCalled();
+		});
+
+		it("finds pre-computed hash when a root-relative base prefixes the URL path", async () => {
+			const element = createTestElement("link", [
+				{ name: "rel", value: "stylesheet" },
+				{ name: "href", value: "/subdir/assets/style.css" },
+			]);
+			const bundle = mockBundle({});
+			const preComputedHashes = {
+				"/assets/style.css": "sha384-subdirHash",
+			};
+
+			await processElement(
+				element,
+				bundle,
+				"sha384",
+				undefined,
+				undefined,
+				preComputedHashes,
+				"/subdir/"
+			);
+
+			expect(getAttrValue(element, "integrity")).toBe("sha384-subdirHash");
+		});
 	});
 
 	describe("addSriToHtml", () => {
