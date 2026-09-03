@@ -846,9 +846,10 @@ export function findPreComputedHashKey(
 			if (has(stripped)) return stripped;
 		}
 	}
+	// pathname always carries a leading slash, so the bare form is the only
+	// normalized variant not already tried.
 	const normalizedPath = normalizeBundlePath(pathname) as string;
 	if (has(normalizedPath)) return normalizedPath;
-	if (has(`/${normalizedPath}`)) return `/${normalizedPath}`;
 	return undefined;
 }
 
@@ -1636,10 +1637,12 @@ export class DynamicImportAnalyzer {
 						idToFileMap,
 						bundle
 					);
+					// seen is seeded with every tagged chunk, so anything newly
+					// reached has no tag on this page.
 					if (!resolved || seen.has(resolved)) continue;
 					seen.add(resolved);
 					stack.push(resolved);
-					if (!refs.has(resolved)) unprotected.add(resolved);
+					unprotected.add(resolved);
 				}
 			}
 		}
@@ -1693,17 +1696,19 @@ export class DynamicImportAnalyzer {
 			for (const el of findElements(document, (node) =>
 				isEligibleForSri(node, skipResources)
 			)) {
-				// Strip query/hash so hashed-URL variants still match.
-				let url = getAttrValue(el, getUrlAttrName(el)!)?.split(
+				// Eligible tags always carry the URL attribute. Strip
+				// query/hash so hashed-URL variants still match.
+				let url = getAttrValue(el, getUrlAttrName(el)!)!.split(
 					/[?#]/
 				)[0];
-				if (!url) continue;
 				if (!isHttpUrl(url) && !url.startsWith("/")) {
 					url = path.posix.join(dir, url);
 				}
+				// inBundle accepts either key form, so a hit is always the
+				// slash-prefixed pathname tried first.
 				const key = findPreComputedHashKey(url, inBundle, base);
 				if (!key) continue;
-				const fileName = key.startsWith("/") ? key.slice(1) : key;
+				const fileName = key.slice(1);
 				if (bundle[fileName].type === "chunk" && !isModuleTag(el)) {
 					continue;
 				}

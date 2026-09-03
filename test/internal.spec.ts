@@ -8,6 +8,7 @@ import {
 	createLogger,
 	DynamicImportAnalyzer,
 	extractPathnameFromResourceUrl,
+	findPreComputedHashKey,
 	getUrlAttrName,
 	handleGenerateBundleError,
 	HtmlProcessor,
@@ -279,6 +280,38 @@ describe("Internal Utility Functions", () => {
 					new Set(["assets/raw.js"])
 				)
 			).toEqual({});
+		});
+	});
+
+	describe("findPreComputedHashKey", () => {
+		const keys = (...k: string[]) => (key: string) => k.includes(key);
+
+		it("returns the exact pathname when present", () => {
+			expect(
+				findPreComputedHashKey("/assets/a.js", keys("/assets/a.js"), "/")
+			).toBe("/assets/a.js");
+		});
+
+		it("strips the configured base before retrying", () => {
+			expect(
+				findPreComputedHashKey(
+					"/app/assets/a.js",
+					keys("/assets/a.js"),
+					"/app/"
+				)
+			).toBe("/assets/a.js");
+		});
+
+		it("falls through when the base-stripped key is also absent", () => {
+			expect(
+				findPreComputedHashKey("/app/assets/a.js", keys(), "/app/")
+			).toBeUndefined();
+		});
+
+		it("accepts a bare bundle-relative key", () => {
+			expect(
+				findPreComputedHashKey("/assets/a.js", keys("assets/a.js"), "/")
+			).toBe("assets/a.js");
 		});
 	});
 
@@ -1725,6 +1758,69 @@ describe("Processing Classes", () => {
 					expect.stringContaining(
 						'Could not resolve import "src/missing.ts"'
 					)
+				);
+			});
+		});
+
+		describe("htmlTagCoveredChunks", () => {
+			const analyzer = new DynamicImportAnalyzer(createMockBundleLogger());
+
+			function chunk(fileName: string, extra: Record<string, unknown> = {}): any {
+				return {
+					type: "chunk",
+					fileName,
+					code: "",
+					imports: [],
+					dynamicImports: [],
+					modules: {},
+					name: fileName,
+					facadeModuleId: null,
+					...extra,
+				};
+			}
+
+			it("walks a chunk that omits its import arrays", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: '<html><head><script type="module" src="/assets/entry.js"></script></head></html>',
+					},
+					"assets/entry.js": {
+						type: "chunk",
+						fileName: "assets/entry.js",
+						code: "",
+						modules: {},
+						name: "entry",
+					},
+				};
+				expect(analyzer.htmlTagCoveredChunks(bundle)).toEqual(
+					new Set(["assets/entry.js"])
+				);
+			});
+
+			it("skips an unresolvable import and revisits a shared chunk only once", () => {
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source:
+							'<html><head><script type="module" src="/assets/entry.js"></script>' +
+							'<link rel="modulepreload" href="/assets/shared.js"></head></html>',
+					},
+					"assets/entry.js": chunk("assets/entry.js", {
+						imports: ["assets/a.js", "assets/b.js", "src/missing.ts"],
+					}),
+					"assets/a.js": chunk("assets/a.js", {
+						imports: ["assets/shared.js"],
+					}),
+					"assets/b.js": chunk("assets/b.js", {
+						imports: ["assets/shared.js"],
+					}),
+					"assets/shared.js": chunk("assets/shared.js"),
+				};
+				// a.js and b.js are reached without tags; shared.js keeps its tag
+				// credit even though two chunks import it.
+				expect(analyzer.htmlTagCoveredChunks(bundle)).toEqual(
+					new Set(["assets/entry.js", "assets/shared.js"])
 				);
 			});
 		});
