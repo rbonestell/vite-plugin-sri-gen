@@ -300,7 +300,10 @@ export function collectModuleChunkFiles(
 		// never satisfy its classic fetch, so the browser discards the preload
 		// and refetches (issue #53). When the caller knows the chunk set, honour
 		// it; the extension test alone cannot tell a chunk from a `.js` asset.
-		if (chunkFileNames && !chunkFileNames.has(fileName)) continue;
+		// Strip any query suffix first (the regex above allows one) so a chunk
+		// whose pathname carries `?v=…` still matches the queryless bundle keys.
+		if (chunkFileNames && !chunkFileNames.has(fileName.split(/[?#]/)[0]))
+			continue;
 		if (isSkippedResource(fileName, skipResources)) continue;
 		if (excludeFileNames.has(fileName)) continue;
 		files.push({ pathname, fileName });
@@ -1920,6 +1923,10 @@ export class HtmlProcessor {
 			sriByPathname
 		);
 
+		// The chunk set is invariant across the two module-graph consumers
+		// below (preload widening and the import map), so compute it once.
+		const chunkFileNames = collectChunkFileNames(bundle);
+
 		// ========================================================================
 		// DYNAMIC CHUNK PRELOAD INJECTION
 		// ========================================================================
@@ -1942,7 +1949,7 @@ export class HtmlProcessor {
 						sriByPathname,
 						this.config.skipResources,
 						redundantImportMapChunks,
-						collectChunkFileNames(bundle)
+						chunkFileNames
 					).map((f) => f.fileName),
 				])
 				: dynamicChunkFiles;
@@ -1971,7 +1978,7 @@ export class HtmlProcessor {
 				sriByPathname,
 				fileName,
 				redundantImportMapChunks,
-				collectChunkFileNames(bundle)
+				chunkFileNames
 			);
 		}
 
@@ -2351,9 +2358,7 @@ export class HtmlProcessor {
 					buildImportIntegrityObject(
 						sriByPathname,
 						this.config.base,
-						this.config.skipResources,
-						new Set(),
-						chunkFileNames
+						this.config.skipResources
 					) ?? {};
 				for (const [key, value] of Object.entries(userIntegrity)) {
 					if (
