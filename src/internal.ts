@@ -1449,6 +1449,10 @@ export class DynamicImportAnalyzer {
 		OutputBundle,
 		Map<string, string>
 	>();
+	private readonly tagCoveredCache = new WeakMap<
+		OutputBundle,
+		Set<string>
+	>();
 
 	/**
 	 * Constructs a new DynamicImportAnalyzer with the provided logger.
@@ -1570,11 +1574,40 @@ export class DynamicImportAnalyzer {
 			}
 		}
 		// Positive tag evidence: a chunk only counts as tag-covered when an
-		// emitted HTML file references it via a <script src> or <link href>
-		// attribute — the element shapes the SRI pass stamps. Inline-script
-		// text, comments, or embedded JSON mentioning a filename are NOT
-		// evidence, and absence of import edges alone is NOT proof of
-		// coverage.
+		// emitted HTML file references it via an SRI-eligible <script>/<link>
+		// (see htmlTagReferencedChunks). Inline-script text, comments, or
+		// embedded JSON mentioning a filename are NOT evidence, and absence of
+		// import edges alone is NOT proof of coverage.
+		const tagReferenced = this.htmlTagReferencedChunks(bundle);
+		const redundant = new Set<string>();
+		for (const chunk of chunks) {
+			if (imported.has(chunk.fileName)) continue;
+			if (tagReferenced.has(chunk.fileName)) {
+				redundant.add(chunk.fileName);
+			}
+		}
+		return redundant;
+	}
+
+	/**
+	 * Chunk file names referenced by an SRI-eligible <script>/<link> in any
+	 * emitted HTML file — the tags the SRI pass actually stamps `integrity`
+	 * onto (isEligibleForSri: script[src], link[rel=stylesheet|modulepreload],
+	 * link[rel=preload][as=script|style]). Such a chunk's fetch is already
+	 * protected however the module graph reaches it — including a statically-
+	 * imported chunk that Vite covers with its own <link rel="modulepreload">.
+	 *
+	 * Unlike redundantImportMapChunks this ignores import edges: a tag protects
+	 * the fetch whether or not another chunk also imports the file, so it is the
+	 * accurate "already covered" set for the coverage warning (issue #52), which
+	 * otherwise over-reports. redundantImportMapChunks is the subset of this not
+	 * reached through the module graph. Memoized per bundle — the HTML parse is
+	 * shared with that method.
+	 */
+	htmlTagReferencedChunks(bundle: OutputBundle): Set<string> {
+		const cached = this.tagCoveredCache.get(bundle);
+		if (cached) return cached;
+
 		const tagUrls: string[] = [];
 		for (const [fileName, item] of Object.entries(bundle)) {
 			if (
@@ -1590,14 +1623,13 @@ export class DynamicImportAnalyzer {
 			} else if (source instanceof Uint8Array) {
 				html = Buffer.from(source).toString("utf8");
 			} else {
-				// Malformed source — no tag evidence, chunk stays in the map.
+				// Malformed source — no tag evidence.
 				continue;
 			}
 			const document = parse(html, { sourceCodeLocationInfo: false });
-			for (const el of findElements(document, (node) => {
-				const name = node.nodeName?.toLowerCase();
-				return name === "script" || name === "link";
-			})) {
+			for (const el of findElements(document, (node) =>
+				isEligibleForSri(node)
+			)) {
 				const url = getAttrValue(
 					el,
 					el.nodeName.toLowerCase() === "script" ? "src" : "href"
@@ -1606,20 +1638,21 @@ export class DynamicImportAnalyzer {
 				if (url) tagUrls.push(url.split(/[?#]/)[0]);
 			}
 		}
-		const isTagReferenced = (chunkFileName: string): boolean =>
-			tagUrls.some(
-				(url) =>
-					url === chunkFileName ||
-					url.endsWith("/" + chunkFileName)
-			);
-		const redundant = new Set<string>();
-		for (const chunk of chunks) {
-			if (imported.has(chunk.fileName)) continue;
-			if (isTagReferenced(chunk.fileName)) {
-				redundant.add(chunk.fileName);
+
+		const covered = new Set<string>();
+		for (const chunk of this.extractChunksFromBundle(bundle)) {
+			if (
+				tagUrls.some(
+					(url) =>
+						url === chunk.fileName ||
+						url.endsWith("/" + chunk.fileName)
+				)
+			) {
+				covered.add(chunk.fileName);
 			}
 		}
-		return redundant;
+		this.tagCoveredCache.set(bundle, covered);
+		return covered;
 	}
 
 	/**

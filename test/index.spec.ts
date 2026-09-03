@@ -3683,6 +3683,107 @@ describe("silent-gap detection at stock defaults", () => {
 		);
 	});
 
+	it("does not report a chunk Vite already modulepreloads as uncovered (issue #52)", async () => {
+		// Vite emits <link rel="modulepreload"> for the entry's static import
+		// graph; the plugin stamps integrity onto those tags, so the chunk is
+		// already covered. A statically-imported chunk with such a tag must not
+		// be counted as an uncovered module-graph chunk even under a relative
+		// base where the import map is disabled.
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const bundle: any = {
+			"index.html": {
+				type: "asset",
+				source:
+					"<!doctype html><html><head>" +
+					'<script type="module" src="./assets/entry.js"></script>' +
+					'<link rel="modulepreload" href="./assets/chunk-A.js">' +
+					"</head><body></body></html>",
+			},
+			"assets/entry.js": {
+				type: "chunk",
+				fileName: "assets/entry.js",
+				code: "import './chunk-A.js'; console.log(1)",
+				imports: ["src/chunkA.ts"],
+				dynamicImports: [],
+				modules: { "src/entry.ts": {} },
+				name: "entry",
+				isEntry: true,
+				facadeModuleId: "src/entry.ts",
+			},
+			"assets/chunk-A.js": {
+				type: "chunk",
+				fileName: "assets/chunk-A.js",
+				code: "export const a = 1",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/chunkA.ts": {} },
+				name: "chunk-A",
+				facadeModuleId: "src/chunkA.ts",
+			},
+		};
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		// The Vite modulepreload tag received integrity → chunk-A is covered.
+		expect(String(bundle["index.html"].source)).toMatch(
+			/<link rel="modulepreload" href="\.\/assets\/chunk-A\.js" integrity="sha256-/
+		);
+		// ...so the coverage model must not warn about it.
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
+	it("still warns when a chunk is referenced only by an SRI-ineligible tag", async () => {
+		// A <link rel="prefetch"> never receives integrity, so a chunk covered
+		// only by one is genuinely unprotected and must still be reported —
+		// tag evidence only counts for tags the SRI pass actually stamps.
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+
+		const bundle: any = {
+			"index.html": {
+				type: "asset",
+				source:
+					"<!doctype html><html><head>" +
+					'<script type="module" src="./assets/entry.js"></script>' +
+					'<link rel="prefetch" href="./assets/chunk-A.js">' +
+					"</head><body></body></html>",
+			},
+			"assets/entry.js": {
+				type: "chunk",
+				fileName: "assets/entry.js",
+				code: "import './chunk-A.js'; console.log(1)",
+				imports: ["src/chunkA.ts"],
+				dynamicImports: [],
+				modules: { "src/entry.ts": {} },
+				name: "entry",
+				isEntry: true,
+				facadeModuleId: "src/entry.ts",
+			},
+			"assets/chunk-A.js": {
+				type: "chunk",
+				fileName: "assets/chunk-A.js",
+				code: "export const a = 1",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/chunkA.ts": {} },
+				name: "chunk-A",
+				facadeModuleId: "src/chunkA.ts",
+			},
+		};
+
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		expect(mockContext.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/chunk-A.js")
+		);
+	});
+
 	it("goes quiet on a relative-base build once the widened set is enabled", async () => {
 		const plugin = sri({
 			algorithm: "sha256",
