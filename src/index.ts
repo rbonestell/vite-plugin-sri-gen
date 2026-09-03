@@ -8,6 +8,7 @@ type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
 type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
+	collectChunkFileNames,
 	collectModuleChunkFiles,
 	createLogger,
 	DynamicImportAnalyzer,
@@ -499,7 +500,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						const moduleChunks = collectModuleChunkFiles(
 							sriByPathname,
 							skipResources,
-							redundantImportMapChunks
+							redundantImportMapChunks,
+							collectChunkFileNames(bundle)
 						).map((f) => f.fileName);
 						const covered = new Set<string>();
 						if (importMapCapable) {
