@@ -504,6 +504,15 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							collectChunkFileNames(bundle)
 						).map((f) => f.fileName);
 						const covered = new Set<string>();
+						// A chunk referenced by an integrity-bearing HTML tag
+						// (a <script type="module"> or Vite's own
+						// <link rel="modulepreload">) is already protected by the
+						// SRI attribute pass, regardless of base or channel. Not
+						// crediting these over-reported statically-imported chunks
+						// that Vite preloads (issue #52).
+						dynamicImportAnalyzer
+							.htmlTagReferencedChunks(bundle)
+							.forEach((f) => covered.add(f));
 						if (importMapCapable) {
 							moduleChunks.forEach((f) => covered.add(f));
 						}
