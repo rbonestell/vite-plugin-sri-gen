@@ -6176,32 +6176,6 @@ describe("collectModuleChunkFiles", () => {
 		expect(files).toEqual([]);
 	});
 
-	it("restricts to genuine Rollup chunks when a chunk set is given", () => {
-		// A `.js` bundle asset (e.g. registerSW.js) must not be treated as a
-		// module chunk (issue #53).
-		const withAsset = {
-			...sriByPathname,
-			"/registerSW.js": "sha256-sw",
-		};
-		const files = collectModuleChunkFiles(
-			withAsset,
-			[],
-			new Set(),
-			new Set(["assets/dep.js", "assets/app.mjs"])
-		).map((f) => f.fileName);
-		expect(files).toEqual(["assets/dep.js", "assets/app.mjs"]);
-	});
-
-	it("matches a query-suffixed chunk pathname against the queryless chunk set", () => {
-		const files = collectModuleChunkFiles(
-			{ "/assets/dep.js?v=abc": "sha256-dep" },
-			[],
-			new Set(),
-			new Set(["assets/dep.js"])
-		).map((f) => f.fileName);
-		expect(files).toEqual(["assets/dep.js?v=abc"]);
-	});
-
 	it("still yields chunks for a relative base that cannot produce import map keys", () => {
 		// modulepreload hrefs resolve against the document URL, so a relative
 		// base is usable here even though it yields no valid import map.

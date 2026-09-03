@@ -498,21 +498,25 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						//
 						// Gated on chunks actually existing, so a single-bundle
 						// build with no module-graph fetches stays quiet.
-						const moduleChunks = collectModuleChunkFiles(
-							sriByPathname,
-							skipResources,
-							redundantImportMapChunks
-						).map((f) => f.fileName);
-						const covered = new Set<string>();
+						//
 						// A chunk every reaching page references via a stamped
 						// module tag (a <script type="module"> or Vite's own
 						// <link rel="modulepreload">) is already protected by the
-						// SRI attribute pass, regardless of base or channel.
-						// Without this credit, statically-imported chunks that
-						// Vite preloads were over-reported (issue #52).
-						dynamicImportAnalyzer
-							.htmlTagCoveredChunks(bundle, base, skipResources)
-							.forEach((f) => covered.add(f));
+						// SRI attribute pass, regardless of base or channel, so
+						// it is excluded up front. Without this credit,
+						// statically-imported chunks that Vite preloads were
+						// over-reported (issue #52). redundantImportMapChunks is
+						// a subset of this set, so it needs no separate exclusion.
+						const moduleChunks = collectModuleChunkFiles(
+							sriByPathname,
+							skipResources,
+							dynamicImportAnalyzer.htmlTagCoveredChunks(
+								bundle,
+								base,
+								skipResources
+							)
+						).map((f) => f.fileName);
+						const covered = new Set<string>();
 						if (importMapCapable) {
 							moduleChunks.forEach((f) => covered.add(f));
 						}

@@ -284,43 +284,18 @@ export function buildImportIntegrityObject(
 export function collectModuleChunkFiles(
 	sriByPathname: Record<string, string>,
 	skipResources: string[] = [],
-	excludeFileNames: Set<string> = new Set(),
-	chunkFileNames?: Set<string>
+	excludeFileNames: Set<string> = new Set()
 ): Array<{ pathname: string; fileName: string }> {
 	const files: Array<{ pathname: string; fileName: string }> = [];
 	for (const pathname of Object.keys(sriByPathname)) {
 		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
 		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
-		// Preload injection only: a `.js` file emitted as a bundle ASSET (e.g.
-		// vite-plugin-pwa's registerSW.js, loaded via a classic <script>) is
-		// not a module — a modulepreload can never satisfy its classic fetch,
-		// so the browser discards the preload and refetches (issue #53). It
-		// stays in the import map and the coverage model, where an entry for a
-		// non-module fetch is inert but one for a `?url` import() is real
-		// coverage. Strip any query suffix first (the regex above allows one)
-		// so a chunk whose pathname carries `?v=…` still matches the queryless
-		// bundle keys.
-		if (chunkFileNames && !chunkFileNames.has(fileName.split(/[?#]/)[0]))
-			continue;
 		if (isSkippedResource(fileName, skipResources)) continue;
 		if (excludeFileNames.has(fileName)) continue;
 		files.push({ pathname, fileName });
 	}
 	return files;
-}
-
-/**
- * The set of emitted file names that are genuine Rollup chunks (type ===
- * "chunk"), as they key `sriByPathname`. Passed to collectModuleChunkFiles so a
- * `.js` bundle ASSET is never mistaken for a module chunk (issue #53).
- */
-export function collectChunkFileNames(bundle: OutputBundle): Set<string> {
-	const names = new Set<string>();
-	for (const [fileName, item] of Object.entries(bundle)) {
-		if (item?.type === "chunk") names.add(fileName);
-	}
-	return names;
 }
 
 /**
@@ -2054,6 +2029,11 @@ export class HtmlProcessor {
 		// import site (there is no syntax for it). Manufacturing a
 		// <link rel="modulepreload" integrity> is the only build-time way to
 		// attach a hash to that fetch. Cost: those chunks are fetched eagerly.
+		//
+		// Only genuine Rollup chunks are preloaded: a `.js` bundle ASSET (e.g.
+		// vite-plugin-pwa's registerSW.js, loaded via a classic <script>) is
+		// not a module, so a modulepreload can never satisfy its fetch and the
+		// browser discards it and refetches (issue #53).
 		const preloadFiles =
 			this.config.importMapIntegrity === false
 				? new Set([
@@ -2061,9 +2041,10 @@ export class HtmlProcessor {
 					...collectModuleChunkFiles(
 						sriByPathname,
 						this.config.skipResources,
-						redundantImportMapChunks,
-						collectChunkFileNames(bundle)
-					).map((f) => f.fileName),
+						redundantImportMapChunks
+					)
+						.map((f) => f.fileName)
+						.filter((f) => bundle[f]?.type === "chunk"),
 				])
 				: dynamicChunkFiles;
 
