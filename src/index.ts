@@ -486,6 +486,16 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// catch (relative base at stock defaults: no map, narrow
 						// preloads, no rewrite, and no warning).
 						//
+						// This models the EMITTED HTML: every channel below is
+						// injected into those pages, and the tag credit is read
+						// from them. A manifest emitted alongside HTML does not
+						// remove the import map from those pages — it only keeps
+						// the import() rewrite active for backend-rendered ones
+						// (see importMapCapable) — so the map is credited here
+						// whenever it is actually injected (issue #52 follow-up:
+						// base "/" plus build.manifest warned about chunks the
+						// map already covered).
+						//
 						// A module-graph chunk is covered when:
 						//  - the import map is emitted (covers every chunk), or
 						//  - modulepreload injection reaches it: the whole graph
@@ -517,7 +527,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							)
 						).map((f) => f.fileName);
 						const covered = new Set<string>();
-						if (importMapCapable) {
+						if (importMapIntegrity && isImportMapCapableBase(base)) {
 							moduleChunks.forEach((f) => covered.add(f));
 						}
 						if (preloadDynamicChunks) {

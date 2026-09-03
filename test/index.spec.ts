@@ -3950,6 +3950,28 @@ describe("silent-gap detection at stock defaults", () => {
 		);
 	});
 
+	it("credits the import map when a manifest is emitted alongside HTML (issue #52 follow-up)", async () => {
+		// The manifest only decides whether the import() rewrite must stay
+		// active for backend-rendered pages. The emitted HTML still carries
+		// the import map, so its module graph is covered and must not warn.
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle = relativeBaseGraph();
+		bundle[".vite/manifest.json"] = {
+			type: "asset",
+			source: JSON.stringify({ "src/entry.ts": { file: "assets/entry.js" } }),
+		};
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		expect(String(bundle["index.html"].source)).toContain(
+			'<script type="importmap">'
+		);
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
 	it("goes quiet on a relative-base build once the widened set is enabled", async () => {
 		const plugin = sri({
 			algorithm: "sha256",
