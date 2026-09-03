@@ -8,7 +8,6 @@ type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
 type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
-	collectChunkFileNames,
 	collectModuleChunkFiles,
 	createLogger,
 	DynamicImportAnalyzer,
@@ -475,7 +474,9 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// point walking the graph for manifest-only builds.
 						const redundantImportMapChunks =
 							dynamicImportAnalyzer.redundantImportMapChunks(
-								bundle
+								bundle,
+								base,
+								skipResources
 							);
 
 						// Never degrade coverage silently. Model every channel
@@ -500,18 +501,17 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						const moduleChunks = collectModuleChunkFiles(
 							sriByPathname,
 							skipResources,
-							redundantImportMapChunks,
-							collectChunkFileNames(bundle)
+							redundantImportMapChunks
 						).map((f) => f.fileName);
 						const covered = new Set<string>();
-						// A chunk referenced by an integrity-bearing HTML tag
-						// (a <script type="module"> or Vite's own
+						// A chunk every reaching page references via a stamped
+						// module tag (a <script type="module"> or Vite's own
 						// <link rel="modulepreload">) is already protected by the
-						// SRI attribute pass, regardless of base or channel. Not
-						// crediting these over-reported statically-imported chunks
-						// that Vite preloads (issue #52).
+						// SRI attribute pass, regardless of base or channel.
+						// Without this credit, statically-imported chunks that
+						// Vite preloads were over-reported (issue #52).
 						dynamicImportAnalyzer
-							.htmlTagReferencedChunks(bundle)
+							.htmlTagCoveredChunks(bundle, base, skipResources)
 							.forEach((f) => covered.add(f));
 						if (importMapCapable) {
 							moduleChunks.forEach((f) => covered.add(f));
