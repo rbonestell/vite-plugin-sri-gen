@@ -3310,6 +3310,43 @@ describe("importMapIntegrity: CSP-safe coverage without an inline script", () =>
 		);
 	});
 
+	it("does not modulepreload a classic-script .js asset (issue #53)", async () => {
+		// vite-plugin-pwa emits registerSW.js as an ASSET and loads it with a
+		// classic <script src>. A modulepreload can never satisfy a classic
+		// fetch (mismatched request/credentials modes), so the browser discards
+		// it and refetches. Only real Rollup chunks may be preloaded.
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: false,
+		}) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+
+		const bundle = makeGapBundle();
+		(bundle as any)["registerSW.js"] = {
+			type: "asset",
+			fileName: "registerSW.js",
+			source: "self.addEventListener('install', () => {});",
+		};
+		(bundle["index.html"] as Asset).source = String(
+			(bundle["index.html"] as Asset).source
+		).replace(
+			"</head>",
+			'<script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>'
+		);
+
+		await plugin.generateBundle.handler({}, bundle as any);
+		const html = String((bundle["index.html"] as Asset).source);
+
+		// The classic script still gets integrity on its existing tag...
+		expect(html).toMatch(
+			/<script id="vite-plugin-pwa:register-sw" src="\/registerSW\.js" integrity="sha256-[^"]+"><\/script>/
+		);
+		// ...but no modulepreload is injected for it.
+		expect(html).not.toMatch(
+			/<link rel="modulepreload" href="\/registerSW\.js"/
+		);
+	});
+
 	it("emits no inline import map script when disabled", async () => {
 		const plugin = sri({
 			algorithm: "sha256",

@@ -252,14 +252,16 @@ export function buildImportIntegrityObject(
 	sriByPathname: Record<string, string>,
 	base: string,
 	skipResources: string[] = [],
-	excludeFileNames: Set<string> = new Set()
+	excludeFileNames: Set<string> = new Set(),
+	chunkFileNames?: Set<string>
 ): Record<string, string> | null {
 	if (!isImportMapCapableBase(base)) return null;
 	const result: Record<string, string> = {};
 	for (const { pathname, fileName } of collectModuleChunkFiles(
 		sriByPathname,
 		skipResources,
-		excludeFileNames
+		excludeFileNames,
+		chunkFileNames
 	)) {
 		result[joinBaseHref(base, fileName)] = sriByPathname[pathname];
 	}
@@ -284,18 +286,42 @@ export function buildImportIntegrityObject(
 export function collectModuleChunkFiles(
 	sriByPathname: Record<string, string>,
 	skipResources: string[] = [],
-	excludeFileNames: Set<string> = new Set()
+	excludeFileNames: Set<string> = new Set(),
+	chunkFileNames?: Set<string>
 ): Array<{ pathname: string; fileName: string }> {
 	const files: Array<{ pathname: string; fileName: string }> = [];
 	for (const pathname of Object.keys(sriByPathname)) {
 		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
 		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+		// Only genuine Rollup chunks belong in the module graph. A `.js` file
+		// emitted as a bundle ASSET (e.g. vite-plugin-pwa's registerSW.js,
+		// loaded via a classic <script>) is not a module — a modulepreload can
+		// never satisfy its classic fetch, so the browser discards the preload
+		// and refetches (issue #53). When the caller knows the chunk set, honour
+		// it; the extension test alone cannot tell a chunk from a `.js` asset.
+		// Strip any query suffix first (the regex above allows one) so a chunk
+		// whose pathname carries `?v=…` still matches the queryless bundle keys.
+		if (chunkFileNames && !chunkFileNames.has(fileName.split(/[?#]/)[0]))
+			continue;
 		if (isSkippedResource(fileName, skipResources)) continue;
 		if (excludeFileNames.has(fileName)) continue;
 		files.push({ pathname, fileName });
 	}
 	return files;
+}
+
+/**
+ * The set of emitted file names that are genuine Rollup chunks (type ===
+ * "chunk"), as they key `sriByPathname`. Passed to collectModuleChunkFiles so a
+ * `.js` bundle ASSET is never mistaken for a module chunk (issue #53).
+ */
+export function collectChunkFileNames(bundle: OutputBundle): Set<string> {
+	const names = new Set<string>();
+	for (const [fileName, item] of Object.entries(bundle)) {
+		if (item?.type === "chunk") names.add(fileName);
+	}
+	return names;
 }
 
 /**
@@ -1897,6 +1923,10 @@ export class HtmlProcessor {
 			sriByPathname
 		);
 
+		// The chunk set is invariant across the two module-graph consumers
+		// below (preload widening and the import map), so compute it once.
+		const chunkFileNames = collectChunkFileNames(bundle);
+
 		// ========================================================================
 		// DYNAMIC CHUNK PRELOAD INJECTION
 		// ========================================================================
@@ -1918,7 +1948,8 @@ export class HtmlProcessor {
 					...collectModuleChunkFiles(
 						sriByPathname,
 						this.config.skipResources,
-						redundantImportMapChunks
+						redundantImportMapChunks,
+						chunkFileNames
 					).map((f) => f.fileName),
 				])
 				: dynamicChunkFiles;
@@ -1946,7 +1977,8 @@ export class HtmlProcessor {
 				processedHtml,
 				sriByPathname,
 				fileName,
-				redundantImportMapChunks
+				redundantImportMapChunks,
+				chunkFileNames
 			);
 		}
 
@@ -2237,13 +2269,15 @@ export class HtmlProcessor {
 		htmlContent: string,
 		sriByPathname: Record<string, string>,
 		fileName: string,
-		redundantImportMapChunks: Set<string>
+		redundantImportMapChunks: Set<string>,
+		chunkFileNames: Set<string>
 	): string {
 		const integrityObject = buildImportIntegrityObject(
 			sriByPathname,
 			this.config.base,
 			this.config.skipResources,
-			redundantImportMapChunks
+			redundantImportMapChunks,
+			chunkFileNames
 		);
 		// Relative base — no valid keys can be produced. The build-level log
 		// in generateBundle reports this once instead of once per HTML file.
