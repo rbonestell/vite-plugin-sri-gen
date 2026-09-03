@@ -8,7 +8,6 @@ type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
 type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
-	collectChunkFileNames,
 	collectModuleChunkFiles,
 	createLogger,
 	DynamicImportAnalyzer,
@@ -475,7 +474,9 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// point walking the graph for manifest-only builds.
 						const redundantImportMapChunks =
 							dynamicImportAnalyzer.redundantImportMapChunks(
-								bundle
+								bundle,
+								base,
+								skipResources
 							);
 
 						// Never degrade coverage silently. Model every channel
@@ -484,6 +485,16 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						// earlier flag-based guard missed the case this exists to
 						// catch (relative base at stock defaults: no map, narrow
 						// preloads, no rewrite, and no warning).
+						//
+						// This models the EMITTED HTML: every channel below is
+						// injected into those pages, and the tag credit is read
+						// from them. A manifest emitted alongside HTML does not
+						// remove the import map from those pages — it only keeps
+						// the import() rewrite active for backend-rendered ones
+						// (see importMapCapable) — so the map is credited here
+						// whenever it is actually injected (issue #52 follow-up:
+						// base "/" plus build.manifest warned about chunks the
+						// map already covered).
 						//
 						// A module-graph chunk is covered when:
 						//  - the import map is emitted (covers every chunk), or
@@ -497,23 +508,26 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 						//
 						// Gated on chunks actually existing, so a single-bundle
 						// build with no module-graph fetches stays quiet.
+						//
+						// A chunk every reaching page references via a stamped
+						// module tag (a <script type="module"> or Vite's own
+						// <link rel="modulepreload">) is already protected by the
+						// SRI attribute pass, regardless of base or channel, so
+						// it is excluded up front. Without this credit,
+						// statically-imported chunks that Vite preloads were
+						// over-reported (issue #52). redundantImportMapChunks is
+						// a subset of this set, so it needs no separate exclusion.
 						const moduleChunks = collectModuleChunkFiles(
 							sriByPathname,
 							skipResources,
-							redundantImportMapChunks,
-							collectChunkFileNames(bundle)
+							dynamicImportAnalyzer.htmlTagCoveredChunks(
+								bundle,
+								base,
+								skipResources
+							)
 						).map((f) => f.fileName);
 						const covered = new Set<string>();
-						// A chunk referenced by an integrity-bearing HTML tag
-						// (a <script type="module"> or Vite's own
-						// <link rel="modulepreload">) is already protected by the
-						// SRI attribute pass, regardless of base or channel. Not
-						// crediting these over-reported statically-imported chunks
-						// that Vite preloads (issue #52).
-						dynamicImportAnalyzer
-							.htmlTagReferencedChunks(bundle)
-							.forEach((f) => covered.add(f));
-						if (importMapCapable) {
+						if (importMapIntegrity && isImportMapCapableBase(base)) {
 							moduleChunks.forEach((f) => covered.add(f));
 						}
 						if (preloadDynamicChunks) {

@@ -3784,6 +3784,194 @@ describe("silent-gap detection at stock defaults", () => {
 		);
 	});
 
+	// entry.js statically imports chunk-A.js; each HTML page gets the given head.
+	function staticImportBundle(pages: Record<string, string>): any {
+		const bundle: any = {
+			"assets/entry.js": {
+				type: "chunk",
+				fileName: "assets/entry.js",
+				code: "import './chunk-A.js'; console.log(1)",
+				imports: ["src/chunkA.ts"],
+				dynamicImports: [],
+				modules: { "src/entry.ts": {} },
+				name: "entry",
+				isEntry: true,
+				facadeModuleId: "src/entry.ts",
+			},
+			"assets/chunk-A.js": {
+				type: "chunk",
+				fileName: "assets/chunk-A.js",
+				code: "export const a = 1",
+				imports: [],
+				dynamicImports: [],
+				modules: { "src/chunkA.ts": {} },
+				name: "chunk-A",
+				facadeModuleId: "src/chunkA.ts",
+			},
+		};
+		for (const [file, head] of Object.entries(pages)) {
+			bundle[file] = {
+				type: "asset",
+				source: `<!doctype html><html><head>${head}</head><body></body></html>`,
+			};
+		}
+		return bundle;
+	}
+
+	async function runRelativeBase(bundle: any, options: any = {}) {
+		const plugin = sri({ algorithm: "sha256", ...options }) as any;
+		plugin.configResolved?.({ base: "./", build: { ssr: false } } as any);
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+		return mockContext;
+	}
+
+	it("keeps a .js bundle asset in the import map", async () => {
+		// A `.js` asset (e.g. `import u from './x.js?url'; import(u)`) is a real
+		// module fetch the import map can verify; only preload injection must
+		// skip non-chunks (issue #53).
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle = staticImportBundle({
+			"index.html": '<script type="module" src="/assets/entry.js"></script>',
+		});
+		bundle["assets/sw-helper.js"] = {
+			type: "asset",
+			fileName: "assets/sw-helper.js",
+			source: "export const sw = 1",
+		};
+		await plugin.generateBundle.handler.call(createMockPluginContext(), {}, bundle);
+		const html = String(bundle["index.html"].source);
+		expect(html).toContain('"/assets/sw-helper.js"');
+		expect(html).not.toMatch(/<link rel="modulepreload" href="\/assets\/sw-helper\.js"/);
+	});
+
+	it("warns about a .js bundle asset no tag or channel covers", async () => {
+		const bundle = staticImportBundle({
+			"index.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="modulepreload" href="./assets/chunk-A.js">',
+		});
+		bundle["assets/sw-helper.js"] = {
+			type: "asset",
+			fileName: "assets/sw-helper.js",
+			source: "export const sw = 1",
+		};
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/sw-helper.js")
+		);
+	});
+
+	it("credits a classic <script> tag for a .js bundle asset", async () => {
+		// vite-plugin-pwa's registerSW.js is an asset loaded by a classic
+		// script; that tag IS its fetch, so it is covered.
+		const bundle = staticImportBundle({
+			"index.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="modulepreload" href="./assets/chunk-A.js">' +
+				'<script src="./registerSW.js"></script>',
+		});
+		bundle["registerSW.js"] = {
+			type: "asset",
+			fileName: "registerSW.js",
+			source: "self.addEventListener('install', () => {})",
+		};
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
+	it("warns when another page reaches a chunk without its own tag (per-page coverage)", async () => {
+		// admin.html modulepreloads chunk-A; index.html reaches it through
+		// entry.js's static import with no tag of its own.
+		const bundle = staticImportBundle({
+			"admin.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="modulepreload" href="./assets/chunk-A.js">',
+			"index.html": '<script type="module" src="./assets/entry.js"></script>',
+		});
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/chunk-A.js")
+		);
+	});
+
+	it("resolves relative tag hrefs against the page's own directory", async () => {
+		const bundle = staticImportBundle({
+			"nested/index.html":
+				'<script type="module" src="../assets/entry.js"></script>' +
+				'<link rel="modulepreload" href="../assets/chunk-A.js">',
+		});
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
+	it("does not credit a tag that skipResources leaves unstamped", async () => {
+		const bundle = staticImportBundle({
+			"index.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="modulepreload" id="legacy-boot" href="./assets/chunk-A.js">',
+		});
+		const ctx = await runRelativeBase(bundle, { skipResources: ["legacy-*"] });
+		expect(ctx.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/chunk-A.js")
+		);
+	});
+
+	it("does not credit a tag whose URL merely ends with the chunk name", async () => {
+		// The SRI pass resolves this to /v2/assets/chunk-A.js, which is not a
+		// bundle file, so the tag never gets a bundle hash.
+		const bundle = staticImportBundle({
+			"index.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="modulepreload" href="https://cdn.other.com/v2/assets/chunk-A.js">',
+		});
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/chunk-A.js")
+		);
+	});
+
+	it("does not credit a classic preload tag for a module chunk", async () => {
+		// <link rel="preload" as="script"> is a no-cors fetch the browser will
+		// not reuse for an ES module import — the same mismatch as issue #53.
+		const bundle = staticImportBundle({
+			"index.html":
+				'<script type="module" src="./assets/entry.js"></script>' +
+				'<link rel="preload" as="script" href="./assets/chunk-A.js">',
+		});
+		const ctx = await runRelativeBase(bundle);
+		expect(ctx.warn).toHaveBeenCalledWith(
+			expect.stringContaining("assets/chunk-A.js")
+		);
+	});
+
+	it("credits the import map when a manifest is emitted alongside HTML (issue #52 follow-up)", async () => {
+		// The manifest only decides whether the import() rewrite must stay
+		// active for backend-rendered pages. The emitted HTML still carries
+		// the import map, so its module graph is covered and must not warn.
+		const plugin = sri({ algorithm: "sha256" }) as any;
+		plugin.configResolved?.({ base: "/", build: { ssr: false } } as any);
+		const bundle = relativeBaseGraph();
+		bundle[".vite/manifest.json"] = {
+			type: "asset",
+			source: JSON.stringify({ "src/entry.ts": { file: "assets/entry.js" } }),
+		};
+		const mockContext = createMockPluginContext();
+		await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+
+		expect(String(bundle["index.html"].source)).toContain(
+			'<script type="importmap">'
+		);
+		expect(mockContext.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("will load without SRI")
+		);
+	});
+
 	it("goes quiet on a relative-base build once the widened set is enabled", async () => {
 		const plugin = sri({
 			algorithm: "sha256",

@@ -252,16 +252,14 @@ export function buildImportIntegrityObject(
 	sriByPathname: Record<string, string>,
 	base: string,
 	skipResources: string[] = [],
-	excludeFileNames: Set<string> = new Set(),
-	chunkFileNames?: Set<string>
+	excludeFileNames: Set<string> = new Set()
 ): Record<string, string> | null {
 	if (!isImportMapCapableBase(base)) return null;
 	const result: Record<string, string> = {};
 	for (const { pathname, fileName } of collectModuleChunkFiles(
 		sriByPathname,
 		skipResources,
-		excludeFileNames,
-		chunkFileNames
+		excludeFileNames
 	)) {
 		result[joinBaseHref(base, fileName)] = sriByPathname[pathname];
 	}
@@ -286,42 +284,18 @@ export function buildImportIntegrityObject(
 export function collectModuleChunkFiles(
 	sriByPathname: Record<string, string>,
 	skipResources: string[] = [],
-	excludeFileNames: Set<string> = new Set(),
-	chunkFileNames?: Set<string>
+	excludeFileNames: Set<string> = new Set()
 ): Array<{ pathname: string; fileName: string }> {
 	const files: Array<{ pathname: string; fileName: string }> = [];
 	for (const pathname of Object.keys(sriByPathname)) {
 		// Match PROCESSABLE_EXTENSIONS semantics: allow a query suffix.
 		if (!/\.m?js(\?|$)/i.test(pathname)) continue;
 		const fileName = pathname.startsWith("/") ? pathname.slice(1) : pathname;
-		// Only genuine Rollup chunks belong in the module graph. A `.js` file
-		// emitted as a bundle ASSET (e.g. vite-plugin-pwa's registerSW.js,
-		// loaded via a classic <script>) is not a module — a modulepreload can
-		// never satisfy its classic fetch, so the browser discards the preload
-		// and refetches (issue #53). When the caller knows the chunk set, honour
-		// it; the extension test alone cannot tell a chunk from a `.js` asset.
-		// Strip any query suffix first (the regex above allows one) so a chunk
-		// whose pathname carries `?v=…` still matches the queryless bundle keys.
-		if (chunkFileNames && !chunkFileNames.has(fileName.split(/[?#]/)[0]))
-			continue;
 		if (isSkippedResource(fileName, skipResources)) continue;
 		if (excludeFileNames.has(fileName)) continue;
 		files.push({ pathname, fileName });
 	}
 	return files;
-}
-
-/**
- * The set of emitted file names that are genuine Rollup chunks (type ===
- * "chunk"), as they key `sriByPathname`. Passed to collectModuleChunkFiles so a
- * `.js` bundle ASSET is never mistaken for a module chunk (issue #53).
- */
-export function collectChunkFileNames(bundle: OutputBundle): Set<string> {
-	const names = new Set<string>();
-	for (const [fileName, item] of Object.entries(bundle)) {
-		if (item?.type === "chunk") names.add(fileName);
-	}
-	return names;
 }
 
 /**
@@ -811,40 +785,12 @@ export async function processElement(
 	// Check for pre-computed integrity hash first
 	let integrity: string | undefined;
 	if (preComputedHashes && resourcePath) {
-		// Extract pathname from resource URL (handles absolute CDN URLs)
-		const pathname = extractPathnameFromResourceUrl(resourcePath);
-
-		// Try to find a matching pre-computed hash
-		// Check exact pathname first, then try normalized versions
-		integrity = preComputedHashes[pathname];
-		if (!integrity && base) {
-			// Retry with the configured base's pathname stripped, mirroring
-			// the runtime's lookupIntegrityByPathname: hash keys are
-			// bundle-relative while sub-path and CDN-base deployments prefix
-			// URLs with the base (issue #50). Parsing the base to a
-			// trailing-slash pathname keeps the strip segment-aligned (a
-			// base of "/app" cannot truncate "/app-legacy/x.js") and matches
-			// protocol-relative URL forms of an absolute base.
-			let basePathname = "/";
-			try {
-				basePathname = new URL(base, "http://x/").pathname;
-				if (!basePathname.endsWith("/")) basePathname += "/";
-			} catch {
-				// Unparseable base (e.g. relative "./") — no stripping
-			}
-			if (basePathname !== "/" && pathname.startsWith(basePathname)) {
-				integrity =
-					preComputedHashes[
-						`/${pathname.slice(basePathname.length)}`
-					];
-			}
-		}
-		if (!integrity) {
-			const normalizedPath = normalizeBundlePath(pathname) as string;
-			integrity =
-				preComputedHashes[normalizedPath] ||
-				preComputedHashes[`/${normalizedPath}`];
-		}
+		const key = findPreComputedHashKey(
+			resourcePath,
+			(k) => !!preComputedHashes[k],
+			base
+		);
+		if (key) integrity = preComputedHashes[key];
 	}
 
 	// If no pre-computed hash found, compute it the traditional way
@@ -864,6 +810,47 @@ export async function processElement(
 	if (crossorigin) {
 		setAttrValue(element, "crossorigin", crossorigin);
 	}
+}
+
+/**
+ * Resolves a tag's src/href to the `sriByPathname` key the SRI pass will
+ * read its hash from, or undefined when no pre-computed hash matches.
+ * Tries the exact pathname, then the pathname with the configured base's
+ * pathname stripped, then the bundle-normalized forms.
+ */
+export function findPreComputedHashKey(
+	resourcePath: string,
+	has: (key: string) => boolean,
+	base?: string
+): string | undefined {
+	// Extract pathname from resource URL (handles absolute CDN URLs)
+	const pathname = extractPathnameFromResourceUrl(resourcePath);
+	if (has(pathname)) return pathname;
+	if (base) {
+		// Retry with the configured base's pathname stripped, mirroring
+		// the runtime's lookupIntegrityByPathname: hash keys are
+		// bundle-relative while sub-path and CDN-base deployments prefix
+		// URLs with the base (issue #50). Parsing the base to a
+		// trailing-slash pathname keeps the strip segment-aligned (a
+		// base of "/app" cannot truncate "/app-legacy/x.js") and matches
+		// protocol-relative URL forms of an absolute base.
+		let basePathname = "/";
+		try {
+			basePathname = new URL(base, "http://x/").pathname;
+			if (!basePathname.endsWith("/")) basePathname += "/";
+		} catch {
+			// Unparseable base (e.g. relative "./") — no stripping
+		}
+		if (basePathname !== "/" && pathname.startsWith(basePathname)) {
+			const stripped = `/${pathname.slice(basePathname.length)}`;
+			if (has(stripped)) return stripped;
+		}
+	}
+	// pathname always carries a leading slash, so the bare form is the only
+	// normalized variant not already tried.
+	const normalizedPath = normalizeBundlePath(pathname) as string;
+	if (has(normalizedPath)) return normalizedPath;
+	return undefined;
 }
 
 /**
@@ -906,6 +893,21 @@ export function isEligibleForSri(
 	}
 
 	return false;
+}
+
+/**
+ * Whether a tag's fetch is an ES module fetch: <script type="module"> or
+ * <link rel="modulepreload">. Only these share a request with a module import.
+ */
+export function isModuleTag(element: Element): boolean {
+	const tagName = element.nodeName.toLowerCase();
+	if (tagName === "script") {
+		return getAttrValue(element, "type")?.toLowerCase() === "module";
+	}
+	return (
+		tagName === "link" &&
+		getAttrValue(element, "rel")?.toLowerCase() === "modulepreload"
+	);
 }
 
 /**
@@ -1449,10 +1451,6 @@ export class DynamicImportAnalyzer {
 		OutputBundle,
 		Map<string, string>
 	>();
-	private readonly tagCoveredCache = new WeakMap<
-		OutputBundle,
-		Set<string>
-	>();
 
 	/**
 	 * Constructs a new DynamicImportAnalyzer with the provided logger.
@@ -1546,7 +1544,11 @@ export class DynamicImportAnalyzer {
 	 * analyzeDynamicImports, so identifiers arriving as module IDs, bundle
 	 * keys, or chunk names (Rollup/Rolldown/Vite differ here) all resolve.
 	 */
-	redundantImportMapChunks(bundle: OutputBundle): Set<string> {
+	redundantImportMapChunks(
+		bundle: OutputBundle,
+		base = "/",
+		skipResources: string[] = []
+	): Set<string> {
 		const idToFileMap = this.buildModuleIdMappings(bundle);
 		const chunks = this.extractChunksFromBundle(bundle);
 		const imported = new Set<string>();
@@ -1574,11 +1576,18 @@ export class DynamicImportAnalyzer {
 			}
 		}
 		// Positive tag evidence: a chunk only counts as tag-covered when an
-		// emitted HTML file references it via an SRI-eligible <script>/<link>
-		// (see htmlTagReferencedChunks). Inline-script text, comments, or
-		// embedded JSON mentioning a filename are NOT evidence, and absence of
-		// import edges alone is NOT proof of coverage.
-		const tagReferenced = this.htmlTagReferencedChunks(bundle);
+		// emitted HTML file references it via a tag the SRI pass stamps (see
+		// tagReferencesByPage). Inline-script text, comments, or embedded JSON
+		// mentioning a filename are NOT evidence, and absence of import edges
+		// alone is NOT proof of coverage.
+		const tagReferenced = new Set<string>();
+		for (const refs of this.tagReferencesByPage(
+			bundle,
+			base,
+			skipResources
+		).values()) {
+			refs.forEach((f) => tagReferenced.add(f));
+		}
 		const redundant = new Set<string>();
 		for (const chunk of chunks) {
 			if (imported.has(chunk.fileName)) continue;
@@ -1590,29 +1599,83 @@ export class DynamicImportAnalyzer {
 	}
 
 	/**
-	 * Chunk file names referenced by an SRI-eligible <script>/<link> in any
-	 * emitted HTML file — the tags the SRI pass actually stamps `integrity`
-	 * onto (isEligibleForSri: script[src], link[rel=stylesheet|modulepreload],
-	 * link[rel=preload][as=script|style]). Such a chunk's fetch is already
-	 * protected however the module graph reaches it — including a statically-
-	 * imported chunk that Vite covers with its own <link rel="modulepreload">.
-	 *
-	 * Unlike redundantImportMapChunks this ignores import edges: a tag protects
-	 * the fetch whether or not another chunk also imports the file, so it is the
-	 * accurate "already covered" set for the coverage warning (issue #52), which
-	 * otherwise over-reports. redundantImportMapChunks is the subset of this not
-	 * reached through the module graph. Memoized per bundle — the HTML parse is
-	 * shared with that method.
+	 * Bundle `.js` files whose fetch a stamped HTML tag already protects on
+	 * every page that reaches them (issue #52). Tag protection is per document:
+	 * a chunk one page modulepreloads is still unverified on another page whose
+	 * module graph reaches it without a tag of its own, so each page's graph
+	 * is walked from its tagged chunks and anything reached untagged is
+	 * withdrawn from the credit.
 	 */
-	htmlTagReferencedChunks(bundle: OutputBundle): Set<string> {
-		const cached = this.tagCoveredCache.get(bundle);
-		if (cached) return cached;
+	htmlTagCoveredChunks(
+		bundle: OutputBundle,
+		base = "/",
+		skipResources: string[] = []
+	): Set<string> {
+		const idToFileMap = this.buildModuleIdMappings(bundle);
+		const covered = new Set<string>();
+		const unprotected = new Set<string>();
+		for (const refs of this.tagReferencesByPage(
+			bundle,
+			base,
+			skipResources
+		).values()) {
+			refs.forEach((f) => covered.add(f));
+			const stack = [...refs].filter(
+				(f) => bundle[f]?.type === "chunk"
+			);
+			const seen = new Set(stack);
+			while (stack.length) {
+				const chunk = bundle[stack.pop()!] as OutputChunk;
+				for (const id of [
+					...(chunk.imports || []),
+					...(chunk.dynamicImports || []),
+				]) {
+					// Unresolvable ids were already warned about by
+					// redundantImportMapChunks.
+					const resolved = this.resolveDynamicImport(
+						id,
+						idToFileMap,
+						bundle
+					);
+					// seen is seeded with every tagged chunk, so anything newly
+					// reached has no tag on this page.
+					if (!resolved || seen.has(resolved)) continue;
+					seen.add(resolved);
+					stack.push(resolved);
+					unprotected.add(resolved);
+				}
+			}
+		}
+		unprotected.forEach((f) => covered.delete(f));
+		return covered;
+	}
 
-		const tagUrls: string[] = [];
-		for (const [fileName, item] of Object.entries(bundle)) {
+	/**
+	 * Per emitted HTML file, the bundle files its tags will carry integrity
+	 * for. A tag counts only when the SRI pass will stamp it (same eligibility
+	 * and skipResources as processElement) and its URL resolves to a bundle
+	 * file the way processElement looks up a hash — a URL that merely ends
+	 * with a chunk's name is not evidence. Relative hrefs resolve against the
+	 * page's own directory.
+	 *
+	 * A chunk is credited only by a module-shaped tag (<script type="module">,
+	 * <link rel="modulepreload">): a classic <script> or
+	 * <link rel="preload" as="script"> is a separate no-cors fetch the browser
+	 * will not reuse for an ES module import (the issue #53 mismatch). A `.js`
+	 * ASSET is not a module-graph member, so any stamped tag is its actual fetch.
+	 */
+	private tagReferencesByPage(
+		bundle: OutputBundle,
+		base: string,
+		skipResources: string[]
+	): Map<string, Set<string>> {
+		const inBundle = (key: string): boolean =>
+			(key.startsWith("/") ? key.slice(1) : key) in bundle;
+		const pages = new Map<string, Set<string>>();
+		for (const [htmlFile, item] of Object.entries(bundle)) {
 			if (
 				item.type !== "asset" ||
-				!fileName.toLowerCase().endsWith(".html")
+				!htmlFile.toLowerCase().endsWith(".html")
 			) {
 				continue;
 			}
@@ -1626,33 +1689,33 @@ export class DynamicImportAnalyzer {
 				// Malformed source — no tag evidence.
 				continue;
 			}
+			const refs = new Set<string>();
+			pages.set(htmlFile, refs);
+			const dir = path.posix.dirname(htmlFile);
 			const document = parse(html, { sourceCodeLocationInfo: false });
 			for (const el of findElements(document, (node) =>
-				isEligibleForSri(node)
+				isEligibleForSri(node, skipResources)
 			)) {
-				const url = getAttrValue(
-					el,
-					el.nodeName.toLowerCase() === "script" ? "src" : "href"
-				);
-				// Strip query/hash so hashed-URL variants still match.
-				if (url) tagUrls.push(url.split(/[?#]/)[0]);
+				// Eligible tags always carry the URL attribute. Strip
+				// query/hash so hashed-URL variants still match.
+				let url = getAttrValue(el, getUrlAttrName(el)!)!.split(
+					/[?#]/
+				)[0];
+				if (!isHttpUrl(url) && !url.startsWith("/")) {
+					url = path.posix.join(dir, url);
+				}
+				// inBundle accepts either key form, so a hit is always the
+				// slash-prefixed pathname tried first.
+				const key = findPreComputedHashKey(url, inBundle, base);
+				if (!key) continue;
+				const fileName = key.slice(1);
+				if (bundle[fileName].type === "chunk" && !isModuleTag(el)) {
+					continue;
+				}
+				refs.add(fileName);
 			}
 		}
-
-		const covered = new Set<string>();
-		for (const chunk of this.extractChunksFromBundle(bundle)) {
-			if (
-				tagUrls.some(
-					(url) =>
-						url === chunk.fileName ||
-						url.endsWith("/" + chunk.fileName)
-				)
-			) {
-				covered.add(chunk.fileName);
-			}
-		}
-		this.tagCoveredCache.set(bundle, covered);
-		return covered;
+		return pages;
 	}
 
 	/**
@@ -1956,9 +2019,6 @@ export class HtmlProcessor {
 			sriByPathname
 		);
 
-		// The chunk set is invariant across the two module-graph consumers
-		// below (preload widening and the import map), so compute it once.
-		const chunkFileNames = collectChunkFileNames(bundle);
 
 		// ========================================================================
 		// DYNAMIC CHUNK PRELOAD INJECTION
@@ -1974,6 +2034,11 @@ export class HtmlProcessor {
 		// import site (there is no syntax for it). Manufacturing a
 		// <link rel="modulepreload" integrity> is the only build-time way to
 		// attach a hash to that fetch. Cost: those chunks are fetched eagerly.
+		//
+		// Only genuine Rollup chunks are preloaded: a `.js` bundle ASSET (e.g.
+		// vite-plugin-pwa's registerSW.js, loaded via a classic <script>) is
+		// not a module, so a modulepreload can never satisfy its fetch and the
+		// browser discards it and refetches (issue #53).
 		const preloadFiles =
 			this.config.importMapIntegrity === false
 				? new Set([
@@ -1981,9 +2046,10 @@ export class HtmlProcessor {
 					...collectModuleChunkFiles(
 						sriByPathname,
 						this.config.skipResources,
-						redundantImportMapChunks,
-						chunkFileNames
-					).map((f) => f.fileName),
+						redundantImportMapChunks
+					)
+						.map((f) => f.fileName)
+						.filter((f) => bundle[f]?.type === "chunk"),
 				])
 				: dynamicChunkFiles;
 
@@ -2010,8 +2076,7 @@ export class HtmlProcessor {
 				processedHtml,
 				sriByPathname,
 				fileName,
-				redundantImportMapChunks,
-				chunkFileNames
+				redundantImportMapChunks
 			);
 		}
 
@@ -2302,15 +2367,13 @@ export class HtmlProcessor {
 		htmlContent: string,
 		sriByPathname: Record<string, string>,
 		fileName: string,
-		redundantImportMapChunks: Set<string>,
-		chunkFileNames: Set<string>
+		redundantImportMapChunks: Set<string>
 	): string {
 		const integrityObject = buildImportIntegrityObject(
 			sriByPathname,
 			this.config.base,
 			this.config.skipResources,
-			redundantImportMapChunks,
-			chunkFileNames
+			redundantImportMapChunks
 		);
 		// Relative base — no valid keys can be produced. The build-level log
 		// in generateBundle reports this once instead of once per HTML file.
