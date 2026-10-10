@@ -1,11 +1,4 @@
 import type { Plugin, PluginOption, ResolvedConfig, Rollup } from "vite";
-
-// Vite re-exports the Rollup bundle types under its `Rollup` namespace. Sourcing
-// them from Vite (rather than directly from "rollup") keeps the plugin aligned
-// with whichever bundler Vite uses — Rollup on Vite ≤7, Rolldown on Vite 8 — so
-// the generateBundle signature stays compatible across the full peer range.
-type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
-type OutputBundle = Rollup.OutputBundle;
 import type { BundleLogger } from "./internal";
 import {
 	collectModuleChunkFiles,
@@ -22,6 +15,13 @@ import {
 	minifyRuntimeSource,
 	validateGenerateBundleInputs,
 } from "./internal";
+
+// Vite re-exports the Rollup bundle types under its `Rollup` namespace. Sourcing
+// them from Vite (rather than directly from "rollup") keeps the plugin aligned
+// with whichever bundler Vite uses — Rollup on Vite ≤7, Rolldown on Vite 8 — so
+// the generateBundle signature stays compatible across the full peer range.
+type NormalizedOutputOptions = Rollup.NormalizedOutputOptions;
+type OutputBundle = Rollup.OutputBundle;
 
 /**
  * Configuration options for the SRI plugin.
@@ -77,6 +77,8 @@ export interface SriPluginOptions {
 	skipResources?: string[];
 	/** Enable verbose build logging. When false (default), only warnings, errors, and a completion summary are shown. */
 	verboseLogging?: boolean;
+	/** Enable inject `nonce` to `<script type="importmap">`(if create). When false (default), only ignore inject */
+	enableCSPNonce?: boolean;
 }
 
 let logger: BundleLogger;
@@ -222,6 +224,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 	let minifyRuntime = true;
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
+	let cspNonce: string | undefined;
 
 	const plugin: Plugin = {
 		name: "vite-plugin-sri-gen",
@@ -235,6 +238,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 			base = config.base ?? "/";
 			minifyRuntime = config.build?.minify !== false;
 			viteRoot = config.root || process.cwd();
+			cspNonce = options.enableCSPNonce ? config.html?.cspNonce : undefined;
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -563,6 +567,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							fetchTimeoutMs,
 							logger,
 							skipResources,
+							cspNonce,
 						});
 
 						await htmlProcessor.processHtmlFiles(

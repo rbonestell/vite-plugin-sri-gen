@@ -6,13 +6,13 @@ import type { DefaultTreeAdapterTypes, Token } from "parse5";
 import { parse, serialize } from "parse5";
 import type { Rollup } from "vite";
 import type { IRuntimeDependencies } from "./dom-abstraction";
+import { defaultDependencies } from "./dom-abstraction";
 
 // Rollup bundle types, sourced via Vite's `Rollup` namespace so they track the
 // active bundler (Rollup on Vite ≤7, Rolldown on Vite 8). See src/index.ts.
 type OutputAsset = Rollup.OutputAsset;
 type OutputBundle = Rollup.OutputBundle;
 type OutputChunk = Rollup.OutputChunk;
-import { defaultDependencies } from "./dom-abstraction";
 
 // Use public parse5 types instead of deep import
 type Document = DefaultTreeAdapterTypes.Document;
@@ -93,6 +93,8 @@ export interface HtmlProcessorConfig {
 	logger: BundleLogger;
 	/** Skip patterns for excluding resources from SRI processing */
 	skipResources: string[];
+	/** Whether to enable `nonce` for `<script type="importmap">` */
+	cspNonce?: string;
 }
 
 // #endregion
@@ -2489,10 +2491,16 @@ export class HtmlProcessor {
 					value: json,
 					parentNode: null,
 				} as unknown as TextNode;
+
+				const attrs = [{ name: "type", value: "importmap" }];
+				if (this.config.cspNonce) {
+					attrs.push({ name: "nonce", value: this.config.cspNonce });
+				}
+
 				const importMapEl: Element = {
 					nodeName: "script",
 					tagName: "script",
-					attrs: [{ name: "type", value: "importmap" }],
+					attrs,
 					namespaceURI: "http://www.w3.org/1999/xhtml" as any,
 					childNodes: [textNode],
 					parentNode: head,
