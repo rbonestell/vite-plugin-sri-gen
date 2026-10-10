@@ -335,6 +335,108 @@ describe("vite-plugin-sri-gen", () => {
 		});
 	});
 
+	describe("CSP `nonce` Validation & Fallback", () => {
+		it("falls back to default", async () => {
+			const plugin = sri({ } as any) as any;
+			const mockContext = createMockPluginContext();
+
+			// First create the logger by calling generateBundle once
+			await plugin.generateBundle.handler.call(mockContext, {}, {
+				"test.js": { type: "chunk", code: "console.log('test')" },
+			} as any);
+
+			// Now simulate Vite config resolution context which will use the logger
+			plugin.configResolved?.call(mockContext, {
+				command: "build",
+				mode: "production",
+				appType: "spa",
+				build: {},
+			} as any);
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+				},
+				"a.js": { type: "chunk", code: "console.log(1)" },
+			};
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+			const out = String(bundle["index.html"].source);
+			expect(out).toContain('<script type="importmap">'); // fallback
+
+			// Should no `nonce` attribute on `<script type="importmap">`
+			{
+				plugin.configResolved?.call(mockContext, {
+					command: "build",
+					mode: "production",
+					appType: "spa",
+					build: {},
+					html: {
+						cspNonce: '$nonce$' // Enable `cspNonce`
+					}
+				} as any);
+
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+					},
+					"a.js": { type: "chunk", code: "console.log(1)" },
+				};
+				await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+				const out = String(bundle["index.html"].source);
+				expect(out).toContain('<script type="importmap">');
+			}
+		});
+
+		it("Enable CSP nonce", async () => {
+			// Has `html: { cspNonce: '$nonce$' }`
+			const plugin = sri({ enableCSPNonce: true }) as any;
+			const mockContext = createMockPluginContext();
+			plugin.configResolved?.call(mockContext, {
+				command: "build",
+				mode: "production",
+				appType: "spa",
+				build: {},
+				html: {
+					cspNonce: '$nonce$' // With valid cspNonce
+				}
+			} as any);
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+				},
+				"a.js": { type: "chunk", code: "console.log(1)" },
+			};
+			await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+			const out = String(bundle["index.html"].source);
+			expect(out).toContain('<script type="importmap" nonce="$nonce$">');
+
+			// No `html: { cspNonce: '$nonce$' }`
+			{
+				plugin.configResolved?.call(mockContext, {
+					command: "build",
+					mode: "production",
+					appType: "spa",
+					build: {}
+				} as any);
+
+				const bundle: any = {
+					"index.html": {
+						type: "asset",
+						source: `<!doctype html><html><head><script src="/a.js"></script></head></html>`,
+					},
+					"a.js": { type: "chunk", code: "console.log(1)" },
+				};
+				await plugin.generateBundle.handler.call(mockContext, {}, bundle);
+				const out = String(bundle["index.html"].source);
+				expect(out).toContain('<script type="importmap">');
+			}
+		});
+	});
+
 	describe("Resource Options Wiring (cache & timeout)", () => {
 		it("uses shared cache and in-flight dedupe within bundle processing", async () => {
 			const plugin = sri({
