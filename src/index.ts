@@ -47,9 +47,13 @@ export interface SriPluginOptions {
 	 * a matching hash, or a nonce will block the map. A blocked map delivers no
 	 * integrity, silently.
 	 *
-	 * Set to false for strict-CSP deployments: no inline script is emitted, and
-	 * the same hashes are delivered as `<link rel="modulepreload" integrity>`
-	 * instead, which needs no CSP cooperation. Coverage is preserved — the
+	 * With a nonce-based CSP, set Vite's `html.cspNonce` instead: the plugin adds
+	 * that nonce to the import map and to the modulepreload links it injects.
+	 *
+	 * Set to false for strict CSPs without a nonce (hash-only or host
+	 * allowlist): no inline script is emitted, and the same hashes are
+	 * delivered as `<link rel="modulepreload" integrity>` instead, which
+	 * `script-src` checks by URL rather than as inline script. Coverage is preserved — the
 	 * preload set widens to the full module graph so chunks reached only by a
 	 * static import inside a lazy chunk stay verified. Those chunks are then
 	 * fetched eagerly rather than on demand.
@@ -220,6 +224,9 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 	// minification of the injected runtime; every other value ("esbuild",
 	// "terser", "oxc", true) leaves it enabled.
 	let minifyRuntime = true;
+	// Vite's `html.cspNonce`; applied to the elements injected in generateBundle,
+	// which run after Vite's own nonce pass.
+	let cspNonce: string | undefined;
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
 
@@ -235,6 +242,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 			base = config.base ?? "/";
 			minifyRuntime = config.build?.minify !== false;
 			viteRoot = config.root || process.cwd();
+			cspNonce = config.html?.cspNonce;
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -342,7 +350,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					// is emitted ALONGSIDE HTML (the manifest consumer's
 					// server-rendered pages have no import map), when base is
 					// relative (no valid import map keys), or when the user
-					// disabled the inline-script channel outright (strict CSP),
+					// disabled the inline-script channel outright (strict CSP
+					// without a nonce),
 					// in which case no map is emitted at all.
 					const importMapCapable =
 						importMapIntegrity &&
@@ -557,6 +566,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							base,
 							preloadDynamicChunks,
 							importMapIntegrity,
+							cspNonce,
 							enableCache,
 							remoteCache,
 							pending,

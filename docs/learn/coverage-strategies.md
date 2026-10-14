@@ -36,7 +36,7 @@ See [import map integrity](/integrate/import-map) for CSP implications, Worker c
 
 ### When the map is unavailable (`importMapIntegrity: false`)
 
-Import maps must be inline, so a `script-src` without `'unsafe-inline'`, a nonce, or a matching hash blocks the map — and does so silently, since the map carries only `integrity` and nothing depends on it for resolution.
+Import maps must be inline, so a `script-src` without `'unsafe-inline'`, a nonce, or a matching hash blocks the map — and does so silently, since the map carries only `integrity` and nothing depends on it for resolution. For a nonce-based policy, set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce): the plugin adds that nonce to the map and to the modulepreload links it injects, so the map is allowed. `importMapIntegrity: false` is for policies with no nonce, such as hash-only or host-allowlist CSPs.
 
 The same option helps whenever the map is unavailable for *any* reason, not just CSP. A **relative `base`** also skips map injection, which leaves statically-imported sub-dependencies of lazy chunks uncovered at otherwise-default settings. The widened preload set is base-shape agnostic, so `importMapIntegrity: false` closes that gap too.
 
@@ -103,7 +103,7 @@ flowchart TD
     A([Build complete]) --> B{HTML emitted\nin bundle?}
     B -- no --> C[Manifest augmentation only\nno HTML-side mechanisms]
     B -- yes --> IM{importMapIntegrity?}
-    IM -- false\nstrict CSP --> R{preloadDynamicChunks?}
+    IM -- false\nstrict CSP, no nonce --> R{preloadDynamicChunks?}
     R -- true\ndefault --> Q[Static tag SRI ✓\nNo inline script emitted\nModulepreload covers the\nfull module graph ✓]
     R -- false --> S[No channel for chunks reached\nonly by a static import\nBuild warns]
     IM -- true\ndefault --> D{base is root-relative\nor absolute URL?}
@@ -133,6 +133,6 @@ flowchart TD
 | Static tag SRI | `<script>`, `<link rel="stylesheet">`, `<link rel="modulepreload">` in HTML | All SRI-supporting browsers | Always on (HTML in bundle) |
 | import map integrity | Module fetches for chunks reached via the module graph (static/dynamic import) — excludes chunks already covered by a tag's own `integrity` | Chrome 127+, Firefox 138+, Safari 18+ | `importMapIntegrity: true` (default) + HTML in bundle + root-relative/absolute `base`; skipped entirely for single-bundle builds with no code splitting |
 | Modulepreload injection | Dynamically imported chunks (via preload + native SRI) | All SRI-supporting browsers | `preloadDynamicChunks: true` (default) |
-| Modulepreload injection, widened | The whole module graph, including chunks reached only by a static `import` inside a lazy chunk | All SRI-supporting browsers | `importMapIntegrity: false` **+** `preloadDynamicChunks: true` (default) — the strict-CSP path, replaces the import map |
+| Modulepreload injection, widened | The whole module graph, including chunks reached only by a static `import` inside a lazy chunk | All SRI-supporting browsers | `importMapIntegrity: false` **+** `preloadDynamicChunks: true` (default) — the path for strict CSPs without a nonce, replaces the import map |
 | Runtime patching | Dynamically created `<script>`/`<link>` elements | All browsers (JS-based) | `runtimePatchDynamicLinks: true` (default) |
 | JS `import()` rewriting | Dynamic `import()` call sites | All browsers with `crypto.subtle` (secure context) | Auto when `preloadDynamicChunks: false` + import map insufficient |

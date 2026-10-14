@@ -81,6 +81,11 @@ export interface HtmlProcessorConfig {
 	 * instead. Defaults to true when omitted.
 	 */
 	importMapIntegrity?: boolean;
+	/**
+	 * Vite's `html.cspNonce`. Added as a `nonce` attribute to the elements this
+	 * plugin injects, because they are created after Vite's own nonce pass.
+	 */
+	cspNonce?: string;
 	/** Whether to enable HTTP caching for remote resources */
 	enableCache: boolean;
 	/** HTTP cache storage for remote resource bytes */
@@ -2069,8 +2074,8 @@ export class HtmlProcessor {
 		// Step 3: Inject import map integrity (runs after preload injection so
 		// the unshift places the map BEFORE the modulepreload links). Skipped
 		// entirely when the inline-script channel is disabled — a strict CSP
-		// without 'unsafe-inline' blocks the map, and a blocked map silently
-		// delivers no integrity at all.
+		// with neither 'unsafe-inline' nor a nonce (html.cspNonce) blocks the
+		// map, and a blocked map silently delivers no integrity at all.
 		if (this.config.importMapIntegrity !== false) {
 			processedHtml = this.injectImportMap(
 				processedHtml,
@@ -2333,6 +2338,10 @@ export class HtmlProcessor {
 			});
 		}
 
+		if (this.config.cspNonce) {
+			linkElement.attrs.push({ name: "nonce", value: this.config.cspNonce });
+		}
+
 		// Insert at the head start, but after a leading charset meta — the
 		// charset declaration must stay within the first 1024 bytes and the
 		// number of injected links grows with chunk count.
@@ -2492,7 +2501,12 @@ export class HtmlProcessor {
 				const importMapEl: Element = {
 					nodeName: "script",
 					tagName: "script",
-					attrs: [{ name: "type", value: "importmap" }],
+					attrs: [
+						{ name: "type", value: "importmap" },
+						...(this.config.cspNonce
+							? [{ name: "nonce", value: this.config.cspNonce }]
+							: []),
+					],
 					namespaceURI: "http://www.w3.org/1999/xhtml" as any,
 					childNodes: [textNode],
 					parentNode: head,

@@ -42,17 +42,17 @@ Import maps are necessarily inline — the HTML spec does not allow a `src` attr
 
 **The failure is silent.** The injected map has no `imports` key, only `integrity`, so module resolution never depended on it — the app loads exactly as before. All that is lost is SRI on the chunks the map alone covered.
 
-The direct fix is to stop using the inline channel:
+For a policy with no nonce, the direct fix is to stop using the inline channel:
 
 ```ts
 sri({ importMapIntegrity: false })
 ```
 
-The plugin then emits no inline script and delivers the same hashes as `<link rel="modulepreload" integrity=...>`, which `script-src` does not govern. Coverage is preserved, including the static-import chunks the map used to cover alone — provided `preloadDynamicChunks` stays at its default `true`, since that is the channel the hashes move to. See [`importMapIntegrity`](/configure/options#importmapintegrity) for the eager-fetch tradeoff and multi-page considerations.
+The plugin then emits no inline script and delivers the same hashes as `<link rel="modulepreload" integrity=...>`, which `script-src` checks as script fetches by URL rather than as inline script. Under a nonce-based policy they need the nonce too, and the plugin adds it when `html.cspNonce` is set. Coverage is preserved, including the static-import chunks the map used to cover alone — provided `preloadDynamicChunks` stays at its default `true`, since that is the channel the hashes move to. See [`importMapIntegrity`](/configure/options#importmapintegrity) for the eager-fetch tradeoff and multi-page considerations.
 
 To keep the map instead, permit it via:
 
-- **A nonce** — your server templating injects a fresh nonce into both the CSP header and the `<script>` tag. Nothing to update after a build.
+- **A nonce** — set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce). The plugin adds that nonce to the import map and to the modulepreload links it injects, and your server replaces it with a fresh value per request in both the CSP header and the HTML. Nothing to update after a build.
 - **A hash** — the browser hashes the inline script and matches it against a `script-src` hash value. The map contains chunk content hashes, so it changes every build; hash extraction and CSP header updates must be automated in your deploy pipeline.
 
 If your build has no code splitting, none of this applies — see above, no import map is injected in the first place, so there's nothing to whitelist.

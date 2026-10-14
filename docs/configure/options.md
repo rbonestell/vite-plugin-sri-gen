@@ -28,7 +28,7 @@ interface SriPluginOptions {
 | `crossorigin` | `'anonymous' \| 'use-credentials'` | `undefined` | CORS attribute added to integrity-enabled elements |
 | `fetchCache` | `boolean` | `true` | Cache remote fetches in-memory and deduplicate concurrent requests |
 | `fetchTimeoutMs` | `number` | `5000` | Abort remote fetches after N ms; `0` disables the timeout |
-| `importMapIntegrity` | `boolean` | `true` | Deliver module-graph integrity via an inline `<script type="importmap">`. Set `false` for a strict CSP with no `'unsafe-inline'` |
+| `importMapIntegrity` | `boolean` | `true` | Deliver module-graph integrity via an inline `<script type="importmap">`. Set `false` for a strict CSP with no `'unsafe-inline'` and no nonce |
 | `preloadDynamicChunks` | `boolean` | `true` | Inject `<link rel="modulepreload" integrity=...>` for dynamically imported chunks |
 | `runtimePatchDynamicLinks` | `boolean` | `true` | Prepend a small runtime to entry chunks that adds integrity to dynamically created elements |
 | `skipResources` | `string[]` | `[]` | Patterns (exact or glob) matched against element `id`, `src`, or `href`; matching resources are excluded from SRI |
@@ -139,7 +139,19 @@ Controls whether module-graph integrity is delivered through an inline `<script 
 
 Import maps must be inline — the HTML spec forbids `src` on `<script type="importmap">`, and external import maps have never shipped in any browser. So a `Content-Security-Policy` whose `script-src` omits `'unsafe-inline'` blocks the injected map. Nothing appears broken when this happens: the map carries only an `integrity` key, so module resolution never depended on it. What is lost, silently, is SRI on every chunk the map was the only cover for.
 
-Set this to `false` when your CSP does not permit inline scripts:
+If your CSP is nonce-based, set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce) (Vite 5.2+) and keep the map. Vite adds the nonce to its own tags, and the plugin adds the same nonce to the import map and the modulepreload links it injects, so the map is allowed:
+
+```ts
+// vite.config.ts
+import sri from 'vite-plugin-sri-gen'
+
+export default {
+  html: { cspNonce: 'PLACEHOLDER' }, // your server replaces this per request
+  plugins: [sri()],
+}
+```
+
+Set this to `false` when your CSP does not permit inline scripts and has no nonce (for example a hash-only or host-allowlist policy):
 
 ```ts
 // vite.config.ts
@@ -156,7 +168,7 @@ export default {
 }
 ```
 
-Coverage is preserved rather than reduced, **provided `preloadDynamicChunks` stays at its default `true`** — that is the channel the hashes move to. With the map disabled, modulepreload injection widens from "dynamically imported chunks" to the whole module graph, so chunks reached only by a static `import` inside a lazy chunk — which have no HTML element of their own and cannot be annotated at the import site — stay verified. `importMapIntegrity: false` + `preloadDynamicChunks: true` is the one configuration that satisfies a strict CSP with no gaps and no server coordination.
+Coverage is preserved rather than reduced, **provided `preloadDynamicChunks` stays at its default `true`** — that is the channel the hashes move to. With the map disabled, modulepreload injection widens from "dynamically imported chunks" to the whole module graph, so chunks reached only by a static `import` inside a lazy chunk — which have no HTML element of their own and cannot be annotated at the import site — stay verified. `importMapIntegrity: false` + `preloadDynamicChunks: true` is the one configuration that satisfies a strict CSP without a nonce, with no gaps and no server coordination. Under a nonce-based policy the injected modulepreload links need the nonce too, and the plugin adds it when `html.cspNonce` is set.
 
 Turning both off leaves chunks reached only by a static import with no channel at all. The `import()` rewrite is not a substitute — it hooks call sites, and a static import is not a call site. The build warns when this would actually leave chunks uncovered, naming the count.
 
