@@ -4008,3 +4008,71 @@ describe("silent-gap detection at stock defaults", () => {
 		);
 	});
 });
+
+describe("html.cspNonce on injected elements (issue #63)", () => {
+	async function build(opts: {
+		cspNonce?: string;
+		importMapIntegrity?: boolean;
+		head?: string;
+	}): Promise<string> {
+		const plugin = sri({
+			algorithm: "sha256",
+			importMapIntegrity: opts.importMapIntegrity,
+		}) as any;
+		plugin.configResolved?.({
+			base: "/",
+			build: { ssr: false },
+			html: opts.cspNonce ? { cspNonce: opts.cspNonce } : undefined,
+		} as any);
+		const bundle: Record<string, Chunk | Asset> = {
+			"index.html": {
+				type: "asset",
+				source: `<!doctype html><html><head>${opts.head ?? ""}<script type="module" src="/assets/entry.js"></script></head><body></body></html>`,
+			},
+			"assets/entry.js": makeEntryChunk({
+				code: "const p = import('./lazy.js');",
+				dynamicImports: ["src/lazy.ts"],
+			}),
+			"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+		} as any;
+		await plugin.generateBundle.handler({}, bundle as any);
+		return String((bundle["index.html"] as Asset).source);
+	}
+
+	it("adds the nonce to the injected import map and modulepreload link", async () => {
+		const html = await build({ cspNonce: "NONCE123" });
+		expect(html).toMatch(
+			/<script type="importmap" nonce="NONCE123">/
+		);
+		expect(html).toMatch(
+			/<link rel="modulepreload" href="\/assets\/lazy\.js"[^>]* nonce="NONCE123"/
+		);
+	});
+
+	it("adds the nonce to modulepreload links when importMapIntegrity is false", async () => {
+		const html = await build({
+			cspNonce: "NONCE123",
+			importMapIntegrity: false,
+		});
+		expect(html).not.toContain("importmap");
+		expect(html).toMatch(
+			/<link rel="modulepreload" href="\/assets\/lazy\.js"[^>]* nonce="NONCE123"/
+		);
+	});
+
+	it("emits no nonce attribute when html.cspNonce is unset", async () => {
+		const html = await build({});
+		expect(html).toContain('<script type="importmap">');
+		expect(html).toContain('rel="modulepreload"');
+		expect(html).not.toContain("nonce");
+	});
+
+	it("leaves a user-authored import map with exactly one nonce", async () => {
+		const html = await build({
+			cspNonce: "NONCE123",
+			head: '<script type="importmap" nonce="NONCE123">{"imports":{}}</script>',
+		});
+		const maps = html.match(/<script type="importmap"[^>]*>/g) ?? [];
+		expect(maps).toEqual(['<script type="importmap" nonce="NONCE123">']);
+	});
+});
