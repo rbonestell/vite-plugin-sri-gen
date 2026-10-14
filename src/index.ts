@@ -350,7 +350,8 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 					// is emitted ALONGSIDE HTML (the manifest consumer's
 					// server-rendered pages have no import map), when base is
 					// relative (no valid import map keys), or when the user
-					// disabled the inline-script channel outright (strict CSP),
+					// disabled the inline-script channel outright (strict CSP
+					// without a nonce),
 					// in which case no map is emitted at all.
 					const importMapCapable =
 						importMapIntegrity &&

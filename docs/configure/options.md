@@ -139,10 +139,12 @@ Controls whether module-graph integrity is delivered through an inline `<script 
 
 Import maps must be inline — the HTML spec forbids `src` on `<script type="importmap">`, and external import maps have never shipped in any browser. So a `Content-Security-Policy` whose `script-src` omits `'unsafe-inline'` blocks the injected map. Nothing appears broken when this happens: the map carries only an `integrity` key, so module resolution never depended on it. What is lost, silently, is SRI on every chunk the map was the only cover for.
 
-If your CSP is nonce-based, set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce) and keep the map. Vite adds the nonce to its own tags, and the plugin adds the same nonce to the import map and the modulepreload links it injects, so the map is allowed:
+If your CSP is nonce-based, set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce) (Vite 5.2+) and keep the map. Vite adds the nonce to its own tags, and the plugin adds the same nonce to the import map and the modulepreload links it injects, so the map is allowed:
 
 ```ts
 // vite.config.ts
+import sri from 'vite-plugin-sri-gen'
+
 export default {
   html: { cspNonce: 'PLACEHOLDER' }, // your server replaces this per request
   plugins: [sri()],

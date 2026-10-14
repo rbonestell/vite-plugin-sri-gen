@@ -2074,8 +2074,8 @@ export class HtmlProcessor {
 		// Step 3: Inject import map integrity (runs after preload injection so
 		// the unshift places the map BEFORE the modulepreload links). Skipped
 		// entirely when the inline-script channel is disabled — a strict CSP
-		// without 'unsafe-inline' blocks the map, and a blocked map silently
-		// delivers no integrity at all.
+		// with neither 'unsafe-inline' nor a nonce (html.cspNonce) blocks the
+		// map, and a blocked map silently delivers no integrity at all.
 		if (this.config.importMapIntegrity !== false) {
 			processedHtml = this.injectImportMap(
 				processedHtml,

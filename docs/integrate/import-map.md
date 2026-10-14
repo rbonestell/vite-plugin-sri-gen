@@ -42,7 +42,7 @@ Import maps are necessarily inline — the HTML spec does not allow a `src` attr
 
 **The failure is silent.** The injected map has no `imports` key, only `integrity`, so module resolution never depended on it — the app loads exactly as before. All that is lost is SRI on the chunks the map alone covered.
 
-The direct fix is to stop using the inline channel:
+For a policy with no nonce, the direct fix is to stop using the inline channel:
 
 ```ts
 sri({ importMapIntegrity: false })
