@@ -48,7 +48,7 @@ The direct fix is to stop using the inline channel:
 sri({ importMapIntegrity: false })
 ```
 
-The plugin then emits no inline script and delivers the same hashes as `<link rel="modulepreload" integrity=...>`, which `script-src` does not govern. Coverage is preserved, including the static-import chunks the map used to cover alone — provided `preloadDynamicChunks` stays at its default `true`, since that is the channel the hashes move to. See [`importMapIntegrity`](/configure/options#importmapintegrity) for the eager-fetch tradeoff and multi-page considerations.
+The plugin then emits no inline script and delivers the same hashes as `<link rel="modulepreload" integrity=...>`, which `script-src` checks as script fetches by URL rather than as inline script. Under a nonce-based policy they need the nonce too, and the plugin adds it when `html.cspNonce` is set. Coverage is preserved, including the static-import chunks the map used to cover alone — provided `preloadDynamicChunks` stays at its default `true`, since that is the channel the hashes move to. See [`importMapIntegrity`](/configure/options#importmapintegrity) for the eager-fetch tradeoff and multi-page considerations.
 
 To keep the map instead, permit it via:
 

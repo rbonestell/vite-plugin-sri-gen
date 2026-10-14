@@ -52,8 +52,8 @@ export interface SriPluginOptions {
 	 *
 	 * Set to false for strict CSPs without a nonce (hash-only or host
 	 * allowlist): no inline script is emitted, and the same hashes are
-	 * delivered as `<link rel="modulepreload" integrity>` instead, which needs
-	 * no CSP cooperation. Coverage is preserved — the
+	 * delivered as `<link rel="modulepreload" integrity>` instead, which
+	 * `script-src` checks by URL rather than as inline script. Coverage is preserved — the
 	 * preload set widens to the full module graph so chunks reached only by a
 	 * static import inside a lazy chunk stay verified. Those chunks are then
 	 * fetched eagerly rather than on demand.

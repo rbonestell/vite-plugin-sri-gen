@@ -46,6 +46,8 @@ flowchart TD
 - Injects `<link rel="modulepreload" integrity=...>` for each lazy chunk discovered in step 2 (when `preloadDynamicChunks` is enabled). With `importMapIntegrity: false` this set widens to the whole module graph, since it then carries every hash the import map would have. Hrefs are resolved against the document, so pages emitted into subdirectories get correct paths under a relative `base`.
 - Injects or merges a `<script type="importmap">` carrying an `integrity` object for the chunks reached through the module graph — chunks already covered by a rendered tag's own `integrity` attribute are excluded, so a build with no code splitting emits no import map at all. Skipped entirely when `importMapIntegrity` is `false`.
 
+When Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce) is set, the injected modulepreload links and a newly injected import map also get that `nonce` attribute. These elements are added after Vite's own nonce pass, so Vite never sees them. A user-authored import map that already existed keeps the nonce Vite gave it.
+
 After processing, the plugin checks every module-graph chunk against the mechanisms actually active for the build and warns about any left with no channel — naming the affected files rather than failing silently. See [Coverage Strategies](/learn/coverage-strategies).
 
 **Step 4 — Manifest augmentation.** If Vite emitted a build manifest (`build.manifest: true`), the plugin adds `integrity` and `cssIntegrity` fields to each manifest entry. This step runs even when no HTML was emitted, making it the primary path for backend-owned HTML generation.

@@ -166,7 +166,7 @@ export default {
 }
 ```
 
-Coverage is preserved rather than reduced, **provided `preloadDynamicChunks` stays at its default `true`** — that is the channel the hashes move to. With the map disabled, modulepreload injection widens from "dynamically imported chunks" to the whole module graph, so chunks reached only by a static `import` inside a lazy chunk — which have no HTML element of their own and cannot be annotated at the import site — stay verified. `importMapIntegrity: false` + `preloadDynamicChunks: true` is the one configuration that satisfies a strict CSP with no gaps and no server coordination.
+Coverage is preserved rather than reduced, **provided `preloadDynamicChunks` stays at its default `true`** — that is the channel the hashes move to. With the map disabled, modulepreload injection widens from "dynamically imported chunks" to the whole module graph, so chunks reached only by a static `import` inside a lazy chunk — which have no HTML element of their own and cannot be annotated at the import site — stay verified. `importMapIntegrity: false` + `preloadDynamicChunks: true` is the one configuration that satisfies a strict CSP without a nonce, with no gaps and no server coordination. Under a nonce-based policy the injected modulepreload links need the nonce too, and the plugin adds it when `html.cspNonce` is set.
 
 Turning both off leaves chunks reached only by a static import with no channel at all. The `import()` rewrite is not a substitute — it hooks call sites, and a static import is not a call site. The build warns when this would actually leave chunks uncovered, naming the count.
 

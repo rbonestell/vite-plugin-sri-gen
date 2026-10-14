@@ -30,7 +30,9 @@ Import maps are necessarily inline — the HTML spec does not allow a `src` attr
 
 Watch for this, because **nothing appears broken when it happens**. The injected map has no `imports` key — only `integrity` — so module resolution never depended on it and your app loads normally. What is silently lost is SRI on every chunk the map was the only cover for.
 
-The simplest fix needs no CSP cooperation at all:
+If your policy is nonce-based, set Vite's [`html.cspNonce`](https://vite.dev/config/shared-options#html-cspnonce). The plugin adds that nonce to the import map and to the modulepreload links it injects, so the map is allowed.
+
+If your policy has no nonce, the simplest fix needs no CSP cooperation at all:
 
 ```ts
 sri({ importMapIntegrity: false })
@@ -40,7 +42,7 @@ No inline script is emitted, and the same hashes ship as `<link rel="moduleprelo
 
 If you would rather keep the map, you must get it past `script-src` yourself:
 
-- **Nonce** — your server templating injects a fresh nonce into both the `script-src` CSP header and the `<script type="importmap">` tag on every response. The nonce changes per request, so there's nothing to update after a build.
+- **Nonce** — set Vite's `html.cspNonce` as described above, and have your server replace it with a fresh value in both the `script-src` CSP header and the HTML on every response. The nonce changes per request, so there's nothing to update after a build.
 - **Hash** — the browser matches the inline script against a `script-src` hash value. Because the map contains chunk content hashes, its content changes on every build, so hash extraction and CSP header updates have to be automated in your deploy pipeline.
 
 To catch a gap like this the day it appears rather than months later, deploy `Integrity-Policy-Report-Only: blocked-destinations=(script)`. It reports any script fetch that carries no integrity metadata, which is exactly the failure mode a blocked import map produces.
