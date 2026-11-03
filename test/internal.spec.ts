@@ -3135,8 +3135,41 @@ describe("Additional Edge Cases and Error Paths", () => {
 
 			expect(mockContext.info).toHaveBeenCalledWith("test info");
 			expect(mockContext.warn).toHaveBeenCalledWith("test warn");
-			expect(mockContext.error).toHaveBeenCalledWith("test error");
+			expect(mockContext.warn).toHaveBeenCalledWith("test error");
+			expect(mockContext.error).not.toHaveBeenCalled();
 			expect(mockContext.info).toHaveBeenCalledWith("test summary");
+		});
+
+		it("does not throw when the plugin context's error() throws", () => {
+			// Rollup's and Rolldown's this.error() always throw
+			const mockContext = {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn((message: string) => {
+					throw new Error(message);
+				}),
+			};
+
+			const logger = createLogger(mockContext, false);
+
+			expect(() =>
+				logger.error("Failed to compute integrity for /a.js:", new Error("fetch failed"))
+			).not.toThrow();
+			expect(mockContext.warn).toHaveBeenCalledWith(
+				"Failed to compute integrity for /a.js: fetch failed"
+			);
+			expect(mockContext.error).not.toHaveBeenCalled();
+		});
+
+		it("does not repeat error detail already in the message", () => {
+			const mockContext = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+			const logger = createLogger(mockContext, false);
+			logger.error("Failed to process x: boom", new Error("boom"));
+			logger.error("plain message");
+
+			expect(mockContext.warn).toHaveBeenNthCalledWith(1, "Failed to process x: boom");
+			expect(mockContext.warn).toHaveBeenNthCalledWith(2, "plain message");
 		});
 
 		it("suppresses info in quiet mode but summary still prints", () => {

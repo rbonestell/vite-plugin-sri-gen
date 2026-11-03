@@ -1026,7 +1026,19 @@ export function createLogger(pluginContext: any, verbose: boolean = false): Bund
 		return {
 			warn: pluginContext.warn.bind(pluginContext),
 			info: verbose ? pluginContext.info.bind(pluginContext) : () => {},
-			error: pluginContext.error.bind(pluginContext),
+			// Not bound to pluginContext.error: Rollup's this.error() throws,
+			// but every caller logs and then carries on (or rethrows itself).
+			// A throw here turned one failed remote fetch into a whole HTML
+			// file left without any integrity, with nothing printed.
+			error: (message: string, error?: unknown) => {
+				const detail =
+					error instanceof Error ? error.message : error ? String(error) : "";
+				pluginContext.warn(
+					detail && !message.includes(detail)
+						? `${message} ${detail}`
+						: message
+				);
+			},
 			summary: pluginContext.info.bind(pluginContext),
 		} as BundleLogger;
 	} else {

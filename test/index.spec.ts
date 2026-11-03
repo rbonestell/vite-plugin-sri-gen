@@ -403,6 +403,59 @@ describe("vite-plugin-sri-gen", () => {
 			expect(out).toBeDefined();
 		});
 
+		it("keeps SRI on the rest of the page when one remote fetch fails under a real plugin context", async () => {
+			const plugin = sri({ algorithm: "sha256" }) as any;
+			plugin.configResolved?.({
+				base: "/",
+				build: { ssr: false },
+			} as any);
+			const fetchSpy = vi
+				.spyOn(globalThis, "fetch" as any)
+				.mockRejectedValue(new Error("fetch failed"));
+			// Like Rollup and Rolldown, this.error() throws
+			const ctx = {
+				...createMockPluginContext(),
+				error: vi.fn((message: string) => {
+					throw new Error(message);
+				}),
+			};
+
+			const bundle: any = {
+				"index.html": {
+					type: "asset",
+					source: `<!doctype html><html><head>
+        <script src="https://cdn.example.com/a.js"></script>
+        <script type="module" src="/assets/entry.js"></script>
+      </head><body></body></html>`,
+				},
+				"assets/entry.js": makeEntryChunk({
+					code: "const p = import('./lazy.js');",
+					dynamicImports: ["src/lazy.ts"],
+				}),
+				"assets/lazy.js": makeDynChunk("assets/lazy.js", "src/lazy.ts"),
+			};
+
+			await plugin.generateBundle.handler.call(ctx, {}, bundle);
+			const out = String(bundle["index.html"].source);
+
+			expect(out).toContain(
+				'<script src="https://cdn.example.com/a.js"></script>'
+			);
+			expect(out).toMatch(
+				/<script type="module" src="\/assets\/entry\.js" integrity="sha256-/
+			);
+			expect(out).toContain('<script type="importmap">');
+			expect(out).toMatch(
+				/<link rel="modulepreload" href="\/assets\/lazy\.js" integrity="sha256-/
+			);
+			expect(ctx.warn).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"Failed to compute integrity for https://cdn.example.com/a.js"
+				)
+			);
+			fetchSpy.mockRestore();
+		});
+
 		it("constructs with fetchCache disabled (pending map undefined path)", () => {
 			// This ensures the branch where pending is undefined executes
 			const plugin = sri({ fetchCache: false });
