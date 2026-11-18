@@ -227,6 +227,9 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 	// Vite's `html.cspNonce`; applied to the elements injected in generateBundle,
 	// which run after Vite's own nonce pass.
 	let cspNonce: string | undefined;
+	// Vite's resolved `publicDir` ("" when disabled). Files there are copied
+	// to the output verbatim and never enter the bundle.
+	let publicDir: string | undefined;
 	let sriByPathname: Record<string, string> = {};
 	let dynamicChunkFiles: Set<string> = new Set();
 
@@ -243,6 +246,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 			minifyRuntime = config.build?.minify !== false;
 			viteRoot = config.root || process.cwd();
 			cspNonce = config.html?.cspNonce;
+			publicDir = config.publicDir;
 
 			// Validate algorithm at runtime and fallback safely
 			if (
@@ -573,6 +577,7 @@ export default function sri(options: SriPluginOptions = {}): PluginOption {
 							fetchTimeoutMs,
 							logger,
 							skipResources,
+							publicDir,
 						});
 
 						await htmlProcessor.processHtmlFiles(

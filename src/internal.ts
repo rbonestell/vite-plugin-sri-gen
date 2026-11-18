@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -98,6 +99,8 @@ export interface HtmlProcessorConfig {
 	logger: BundleLogger;
 	/** Skip patterns for excluding resources from SRI processing */
 	skipResources: string[];
+	/** Vite's resolved `publicDir` ("" when disabled) */
+	publicDir?: string;
 }
 
 // #endregion
@@ -421,7 +424,71 @@ export type LoadResourceOptions = {
 	fetchTimeoutMs?: number;
 	/** In-flight request deduplication map */
 	pending?: Map<string, Promise<Uint8Array>>;
+	/** Vite's resolved `publicDir`; files there are copied to the output verbatim and never enter the bundle */
+	publicDir?: string;
+	/** Resolved Vite base, stripped from URLs before the publicDir lookup */
+	base?: string;
+	/** Bundle-relative directory of the HTML file being processed; anchors relative URLs for the publicDir lookup */
+	htmlDir?: string;
+	/** URLs already warned about as un-hashable, so a multi-page build names each once */
+	warned?: Set<string>;
 };
+
+/**
+ * Reads a resource from Vite's public directory, or returns null when the URL
+ * does not name a file inside it. Mirrors how Vite writes public URLs into
+ * HTML: prefixed with an absolute or root-relative `base`, or relative to the
+ * HTML file's own directory under a relative `base`.
+ */
+function readPublicFile(
+	resourcePath: string,
+	publicDir: string,
+	base?: string,
+	htmlDir?: string
+): Uint8Array | null {
+	let url = resourcePath.split(/[?#]/)[0];
+	if (isHttpUrl(url)) {
+		// Only an absolute base puts a public file behind an absolute URL.
+		if (!base || !isHttpUrl(base)) return null;
+		const prefix = base.endsWith("/") ? base : `${base}/`;
+		if (!url.startsWith(prefix)) return null;
+		url = `/${url.slice(prefix.length)}`;
+	} else if (!url.startsWith("/")) {
+		url = path.posix.join("/", htmlDir ?? "", url);
+	} else if (base) {
+		try {
+			let basePathname = new URL(base, "http://x/").pathname;
+			if (!basePathname.endsWith("/")) basePathname += "/";
+			if (basePathname !== "/" && url.startsWith(basePathname)) {
+				url = `/${url.slice(basePathname.length)}`;
+			}
+		} catch {
+			// Unparseable base — no stripping
+		}
+	}
+	let pathname: string;
+	try {
+		pathname = decodeURIComponent(url);
+	} catch {
+		return null;
+	}
+	const file = path.resolve(publicDir, `.${pathname}`);
+	// The URL comes from HTML; never follow it out of publicDir.
+	const rel = path.relative(publicDir, file);
+	if (
+		!rel ||
+		rel === ".." ||
+		rel.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(rel)
+	) {
+		return null;
+	}
+	try {
+		return readFileSync(file);
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Loads a resource from either HTTP URL or local bundle.
@@ -461,6 +528,17 @@ export async function loadResource(
 	// ============================================================================
 
 	if (isHttpUrl(resourcePath)) {
+		// Under an absolute `base` a public file's URL is absolute too. Hash
+		// the file about to be deployed, not whatever that URL serves today.
+		if (opts?.publicDir) {
+			const publicFile = readPublicFile(
+				resourcePath,
+				opts.publicDir,
+				opts.base
+			);
+			if (publicFile) return publicFile;
+		}
+
 		// Convert protocol-relative URLs to HTTPS
 		const url = resourcePath.startsWith("//")
 			? `https:${resourcePath}`
@@ -534,6 +612,18 @@ export async function loadResource(
 
 	const relPath = normalizeBundlePath(resourcePath);
 	if (typeof relPath !== "string" || !relPath) return null;
+
+	// A public file is tried before findBundleItem's fuzzy fallbacks, which
+	// would otherwise hash a same-named bundle file from another directory.
+	if (opts?.publicDir && !Object.hasOwn(bundle, relPath)) {
+		const publicFile = readPublicFile(
+			resourcePath,
+			opts.publicDir,
+			opts.base,
+			opts.htmlDir
+		);
+		if (publicFile) return publicFile;
+	}
 
 	const bundleItem = findBundleItem(bundle, relPath);
 	if (!bundleItem) return null;
@@ -987,6 +1077,25 @@ export async function addSriToHtml(
 				})
 			)
 		);
+
+		// A local file found in neither the bundle nor publicDir ships
+		// unverified; say so. Remote failures are reported above.
+		for (const element of eligibleElements) {
+			const url = getAttrValue(element, getUrlAttrName(element)!);
+			if (
+				url &&
+				// Remote, and data:/blob:-style URLs, are not local files
+				!isHttpUrl(url) &&
+				!/^[a-z][a-z0-9+.-]*:/i.test(url) &&
+				!getAttrValue(element, "integrity") &&
+				!resourceOpts?.warned?.has(url)
+			) {
+				resourceOpts?.warned?.add(url);
+				logger.warn(
+					`No integrity added for ${url}: not found in the bundle or public directory`
+				);
+			}
+		}
 
 		// Serialize the document back to HTML
 		return serialize(document);
@@ -1869,6 +1978,7 @@ export class DynamicImportAnalyzer {
  */
 export class HtmlProcessor {
 	private readonly config: HtmlProcessorConfig;
+	private readonly warned = new Set<string>();
 
 	/**
 	 * Constructs a new HtmlProcessor with the provided configuration.
@@ -2033,7 +2143,8 @@ export class HtmlProcessor {
 		let processedHtml = await this.addSriToHtmlContent(
 			htmlContent,
 			bundle,
-			sriByPathname
+			sriByPathname,
+			fileName
 		);
 
 
@@ -2154,7 +2265,8 @@ export class HtmlProcessor {
 	private async addSriToHtmlContent(
 		htmlContent: string,
 		bundle: OutputBundle,
-		sriByPathname: Record<string, string>
+		sriByPathname: Record<string, string>,
+		fileName: string
 	): Promise<string> {
 		return addSriToHtml(htmlContent, bundle as any, this.config.logger, {
 			algorithm: this.config.algorithm,
@@ -2164,6 +2276,10 @@ export class HtmlProcessor {
 				pending: this.config.pending,
 				enableCache: this.config.enableCache,
 				fetchTimeoutMs: this.config.fetchTimeoutMs,
+				publicDir: this.config.publicDir,
+				base: this.config.base,
+				htmlDir: path.posix.dirname(fileName),
+				warned: this.warned,
 			},
 			skipResources: this.config.skipResources,
 			preComputedHashes: sriByPathname,
@@ -3087,12 +3203,15 @@ export function installSriRuntime(
 		/**
 		 * Runtime check if element should be skipped
 		 */
-		const shouldSkipElementRuntime = (el: any): boolean => {
+		const shouldSkipElementRuntime = (
+			el: any,
+			attr: (name: string) => string | null
+		): boolean => {
 			if (!skipPatterns || skipPatterns.length === 0) return false;
 
-			const id = el.getAttribute && el.getAttribute("id");
-			const src = el.getAttribute && el.getAttribute("src");
-			const href = el.getAttribute && el.getAttribute("href");
+			const id = attr("id");
+			const src = attr("src");
+			const href = attr("href");
 
 			for (const pattern of skipPatterns) {
 				if (
@@ -3151,12 +3270,28 @@ export function installSriRuntime(
 		 * - Proper integrity and crossorigin attribute handling
 		 *
 		 * @param el - DOM element to process
+		 * @param pendingName - Attribute a setAttribute call is about to write
+		 * @param pendingValue - Its new value. Reading the element as it WILL
+		 * be lets integrity land before the URL attribute does: on a connected
+		 * element the fetch starts inside the native setAttribute, and
+		 * integrity added after that is not applied to it.
 		 */
-		const maybeSetIntegrity = (el: any) => {
+		const maybeSetIntegrity = (
+			el: any,
+			pendingName?: string,
+			pendingValue?: string
+		) => {
 			if (!el) return;
 
+			const attr = (name: string): string | null =>
+				name === pendingName
+					? (pendingValue as string)
+					: el.getAttribute
+						? el.getAttribute(name)
+						: null;
+
 			// Check skip patterns first
-			if (shouldSkipElementRuntime(el)) return;
+			if (shouldSkipElementRuntime(el, attr)) return;
 
 			// ====================================================================
 			// ELEMENT TYPE DETECTION
@@ -3179,11 +3314,10 @@ export function installSriRuntime(
 
 			if (isLink) {
 				// Process link elements with rel/as validation
-				const rel = (el.rel || "").toLowerCase();
-				const as = (
-					(el.getAttribute && el.getAttribute("as")) ||
-					""
+				const rel = (
+					(pendingName === "rel" ? pendingValue : el.rel) || ""
 				).toLowerCase();
+				const as = (attr("as") || "").toLowerCase();
 
 				// Check if this link type is eligible for SRI
 				const eligible =
@@ -3193,10 +3327,10 @@ export function installSriRuntime(
 						(as === "script" || as === "style" || as === "font"));
 
 				if (!eligible) return;
-				url = el.getAttribute && el.getAttribute("href");
+				url = attr("href");
 			} else if (isScript) {
 				// Process script elements
-				url = el.getAttribute && el.getAttribute("src");
+				url = attr("src");
 			}
 
 			if (!url) return;
@@ -3422,9 +3556,8 @@ export function installSriRuntime(
 				name: string,
 				_value: string
 			) {
-				// Call original setAttribute first
-				const r = origSetAttribute.apply(this, arguments as any);
-
+				// Stamp integrity BEFORE the original call: on a connected
+				// element the native setAttribute starts the fetch.
 				try {
 					const n = String(name || "").toLowerCase();
 
@@ -3436,13 +3569,13 @@ export function installSriRuntime(
 							(globalThis as any).HTMLScriptElement &&
 							n === "src")
 					) {
-						maybeSetIntegrity(this);
+						maybeSetIntegrity(this, n, String(_value));
 					}
 				} catch {
 					// Ignore errors to prevent runtime failures
 				}
 
-				return r;
+				return origSetAttribute.apply(this, arguments as any);
 			};
 		}
 

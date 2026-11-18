@@ -56,7 +56,7 @@ After processing, the plugin checks every module-graph chunk against the mechani
 
 Only **JavaScript** (`.js`, `.mjs`) and **CSS** (`.css`) files are hashed. Other asset types — images, fonts, JSON data files — are skipped.
 
-**Local assets** (files emitted by the Rollup build) are read directly from the in-memory bundle. No disk I/O is needed; the bytes in memory are the bytes that will be served.
+**Local assets** (files emitted by the Rollup build) are read directly from the in-memory bundle. No disk I/O is needed; the bytes in memory are the bytes that will be served. Files in Vite's [`publicDir`](https://vite.dev/config/shared-options#publicdir) never enter the bundle, so a tag that references one is hashed from the file on disk instead. A local URL found in neither place is left without `integrity` and the build warns, naming it.
 
 **Remote assets** (any URL starting with `http://`, `https://`, or `//`) are fetched at build time. Protocol-relative URLs (`//cdn.example.com/lib.js`) are treated as HTTPS. Fetching behavior — caching, deduplication, and timeouts — is configurable; see [Networking](/configure/networking).
 
